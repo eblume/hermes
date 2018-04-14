@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+click = "*"
+
+[dev-packages]
+pip = "*"
+coverage = "*"
+pytest = "*"
+pipenv = "==11.10"
+pytest-watch = "*"
+
+[requires]
+python_version = "3.6"
+
+[scripts]
+tests = "pytest tests"
