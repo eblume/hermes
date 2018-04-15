@@ -1,6 +1,9 @@
 class TimeAccount:
     '''An accounting window of time.'''
 
+    def __init__(self):
+        self.events = []
+
     def _inject_test_data(self):
         '''Load dummy data in to this TimeAccount.'''
         # TODO: build a _real_ testing abstraction
@@ -8,7 +11,7 @@ class TimeAccount:
         pass
 
     def __len__(self):
-        return 0
+        return len(self.events)
 
     def __getitem__(self, key):
         return TimeAccount()
