@@ -8,7 +8,7 @@ class TimeAccount:
         '''Load dummy data in to this TimeAccount.'''
         # TODO: build a _real_ testing abstraction
 
-        pass
+        self.events = ['Fake Event'] * 4
 
     def __len__(self):
         return len(self.events)
