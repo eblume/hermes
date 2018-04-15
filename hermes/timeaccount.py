@@ -1,11 +1,18 @@
 class TimeAccount:
     '''An accounting window of time.'''
 
-    def __init__(self):
-        self.tags = []
+    def __init__(self, tags=None, direction=True):
+        self.tags = [] if tags is None else tags
+        self.direction = direction  # True = 'Forward'... maybe?
 
     def combined_with(self, other):
         return CombinedTimeAccount(self, other)
+
+    def __reversed__(self):
+        # TODO: don't create a whole new timeaccount, but rather query smarter
+        # (this is like super duper important and is the entire reason for the
+        # way Hermes is built the way it is, btw. So get this right, please.)
+        return TimeAccount(tags=self.tags[::-1], direction=not self.direction)
 
     def _inject_test_data(self):
         '''Load dummy data in to this TimeAccount.'''
@@ -21,10 +28,10 @@ class TimeAccount:
             return self.tags[key]
         if isinstance(key, slice):
             return self._slice(
-                key.start,
-                key.stop,
-                key.step is None or key.step < 0,
-                abs(key.step) if key.step is not None else 1,
+                slice_from=key.start,
+                slice_to=key.stop,
+                direction=key.step is None or key.step < 0,
+                distinguish=abs(key.step) if key.step is not None else 1,
             )
         raise TypeError('invalid type for key', key)
 
@@ -35,11 +42,13 @@ class TimeAccount:
         )
 
     def _slice(
-        self,
-        slice_from, slice_to,
-        slice_forward=True,
-        slice_distinguish=1
+        self, slice_from=None, slice_to=None,
+        direction=None,
+        distinguish=1
     ):
+        if direction is None:
+            direction = self.direction
+
         return self.tags[0]
 
 
@@ -50,7 +59,9 @@ class CombinedTimeAccount(TimeAccount):
         super().__init__(**init_kwargs)
 
     def __iter__(self):
-        yield from timeline_combiner(*self.accounts)
+        yield (Tag("Fake Tag 1"), True)
+        yield (Tag("Fake Tag 2"), True)
+        yield (Tag("Fake Tag 3"), True)
 
 
 class Tag:
@@ -65,14 +76,3 @@ class Tag:
 
     def __repr__(self):
         return f"Tag('{self.name}')"
-
-
-# Utilities
-# TODO: Move these somewhere else plz and test them good too thnx
-
-
-def timeline_combiner(*accounts):
-    # TODO STUB
-    yield (Tag("Fake Tag 1"), True)
-    yield (Tag("Fake Tag 2"), True)
-    yield (Tag("Fake Tag 3"), True)
