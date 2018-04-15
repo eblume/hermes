@@ -3,7 +3,7 @@ Hermes By Example
 
 Make some imports.
 
-    >>> from hermes.timeaccount import TimeAccount
+    >>> from hermes import TimeAccount
 
 Create a time account and load it with testing data.
 
