@@ -56,7 +56,9 @@ class TimeAccount:
         if direction is None:
             direction = self.direction
 
-        return self.tags[0]
+        # TODO: build a real time slicer, temporal db style! this is it!
+        # (Instead we're just going to do some int-index stuff.)
+        return self.tags[::1 if direction else -1]
 
 
 class CombinedTimeAccount(TimeAccount):
