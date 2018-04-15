@@ -4,11 +4,14 @@ class TimeAccount:
     def __init__(self):
         self.tags = []
 
+    def combined_with(self, other):
+        return CombinedTimeAccount(self, other)
+
     def _inject_test_data(self):
         '''Load dummy data in to this TimeAccount.'''
         # TODO: build a _real_ testing abstraction
 
-        self.tags = [Tag('Fake Tag') for _ in range(4)]
+        self.tags = [Tag(f'Fake Tag {n}') for n in range(1, 5)]
 
     def __len__(self):
         return len(self.tags)
@@ -31,11 +34,13 @@ class TimeAccount:
             for tag, paired in self.combined_with(other)
         )
 
-    def _slice(self, slice_from, slice_to, slice_forward=True, slice_distinguish=1):
+    def _slice(
+        self,
+        slice_from, slice_to,
+        slice_forward=True,
+        slice_distinguish=1
+    ):
         return self.tags[0]
-
-    def combined_with(self, other):
-        return CombinedTimeAccount(self, other)
 
 
 class CombinedTimeAccount(TimeAccount):
@@ -68,6 +73,6 @@ class Tag:
 
 def timeline_combiner(*accounts):
     # TODO STUB
-    yield (Tag("Fake Tag"), True)
-    yield (Tag("Fake Tag"), True)
-    yield (Tag("Fake Tag"), True)
+    yield (Tag("Fake Tag 1"), True)
+    yield (Tag("Fake Tag 2"), True)
+    yield (Tag("Fake Tag 3"), True)

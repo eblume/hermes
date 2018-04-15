@@ -4,7 +4,6 @@ Hermes By Example
 Make some imports.
 
     >>> from hermes.timeaccount import TimeAccount
-    >>> import datetime as dt
 
 Create a time account and load it with testing data.
 
@@ -22,8 +21,14 @@ Copy the account.
     >>> account is account[:]
     False
 
-Get the first tag.
+Query for some tag info.
 
-    >>> account[0]
-    Tag('Fake Tag')
-
+    >>> tags = iter(account)
+    >>> first_tag = next(tags)
+    >>> second_tag = next(tags)
+    >>> first_tag
+    Tag('Fake Tag 1')
+    >>> second_tag
+    Tag('Fake Tag 2')
+    >>> first_tag == second_tag
+    False
