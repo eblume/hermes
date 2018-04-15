@@ -15,9 +15,15 @@ Create a time account and load it with testing data.
     >>> len(account)
     4
 
-Some consistency checks for the interface.
+Copy the account.
 
     >>> account == account[:]
     True
     >>> account is account[:]
     False
+
+Get the first tag.
+
+    >>> account[0]
+    Tag('Fake Tag')
+
