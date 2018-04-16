@@ -1,3 +1,4 @@
+import datetime as dt
 import pytest
 
 
@@ -27,3 +28,17 @@ def test_describe_complex_topology(complex_account):
     assert len(set(tag.valid_from for tag in complex_account)) == 4
     # The 4 tags have 3 distinct end times
     assert len(set(tag.valid_to for tag in complex_account)) == 3
+
+    # time
+    assert all(
+        isinstance(tag.valid_from, dt.datetime)
+        for tag in complex_account
+    )
+    assert all(
+        isinstance(tag.valid_to, dt.datetime)
+        for tag in complex_account
+    )
+    assert all(
+        tag.valid_to >= tag.valid_from
+        for tag in complex_account
+    )
