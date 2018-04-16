@@ -17,15 +17,7 @@ class TimeAccount:
 
     def __reversed__(self):
         # TODO: don't create a whole new timeaccount, but rather query smarter
-        # (this is like super duper important and is the entire reason for the
-        # way Hermes is built the way it is, btw. So get this right, please.)
         return TimeAccount(tags=self.tags[::-1], direction=not self.direction)
-
-    def _inject_test_data(self):
-        '''Load dummy data in to this TimeAccount.'''
-        # TODO: build a _real_ testing abstraction
-
-        self.tags = [Tag(f'Fake Tag {n}') for n in range(1, 5)]
 
     def __len__(self):
         return len(self.tags)

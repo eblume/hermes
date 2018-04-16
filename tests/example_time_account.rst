@@ -1,20 +1,15 @@
 Hermes By Example
 -----------------
 
-Make some imports.
+Let's assume we've already got a TimeAccount. We'll get to know it as we
+examine its properties.
 
-    >>> from hermes import TimeAccount
+This account has four main tags.
 
-Create a time account and load it with testing data.
-
-    >>> account = TimeAccount()
-    >>> len(account)
-    0
-    >>> account._inject_test_data()
     >>> len(account)
     4
 
-Copy the account.
+We can copy the account.
 
     >>> account == account[:]
     True
