@@ -1,5 +1,7 @@
 """Hermes, the Time Accountant"""
 
+import datetime as dt
+
 __author__ = """Erich Blume"""
 __email__ = 'blume.erich@gmail.com'
 __version__ = '0.0.1'
@@ -8,16 +10,15 @@ __version__ = '0.0.1'
 class TimeAccount:
     '''An accounting window of time.'''
 
-    def __init__(self, tags=None, direction=True):
+    def __init__(self, tags=None):
         self.tags = [] if tags is None else tags
-        self.direction = direction  # True = 'Forward'... maybe?
 
     def combined_with(self, other):
         return CombinedTimeAccount(self, other)
 
     def __reversed__(self):
         # TODO: don't create a whole new timeaccount, but rather query smarter
-        return TimeAccount(tags=self.tags[::-1], direction=not self.direction)
+        return TimeAccount(tags=self.tags[::-1])
 
     def __len__(self):
         return len(self.tags)
@@ -42,12 +43,9 @@ class TimeAccount:
 
     def _slice(
         self, slice_from=None, slice_to=None,
-        direction=None,
+        direction=True,  # true is 'forward' from ref. of window
         distinguish=1
     ):
-        if direction is None:
-            direction = self.direction
-
         # TODO: build a real time slicer, temporal db style! this is it!
         # (Instead we're just going to do some int-index stuff.)
         return self.tags[::1 if direction else -1]

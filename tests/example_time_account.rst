@@ -22,9 +22,9 @@ Query for some tag info.
     >>> first_tag = next(tags)
     >>> second_tag = next(tags)
     >>> first_tag
-    Tag('Fake Tag 1')
+    Tag('Tag A')
     >>> second_tag
-    Tag('Fake Tag 2')
+    Tag('Tag B')
     >>> first_tag == second_tag
     False
 
