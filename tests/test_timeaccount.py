@@ -42,3 +42,12 @@ def test_describe_complex_topology(complex_account):
         tag.valid_to >= tag.valid_from
         for tag in complex_account
     )
+
+    # divide the tags in the account in to groups of two hours length.
+    # (see test/fixtures/timeaccount.py for the layout reference)
+
+    two_hours = dt.timedelta(hours=2)
+    accounts = list(complex_account[::two_hours])
+    assert len(complex_account) == len(
+        set(tag for account in accounts for tag in account)
+    )

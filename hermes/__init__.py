@@ -1,6 +1,7 @@
 """Hermes, the Time Accountant"""
 
 import datetime as dt
+from operator import attrgetter
 
 __author__ = """Erich Blume"""
 __email__ = 'blume.erich@gmail.com'
@@ -23,32 +24,43 @@ class TimeAccount:
     def __len__(self):
         return len(self.tags)
 
+    @property
+    def span(self):
+        # TODO optimize this (index? cache?)
+        oldest = min(self.tags, key=attrgetter('valid_from'))
+        most_recent = max(self.tags, key=attrgetter('valid_to'))
+        return Span(oldest.valid_from, most_recent.valid_to)
+
     def __getitem__(self, key):
-        if isinstance(key, int):
-            return self.tags[key]
-        if isinstance(key, slice):
-            return self._slice(
-                slice_from=key.start,
-                slice_to=key.stop,
-                direction=key.step is None or key.step < 0,
-                distinguish=abs(key.step) if key.step is not None else 1,
-            )
-        raise TypeError('invalid type for key', key)
+        if isinstance(key, Span):
+            slice_span = key
+        elif not isinstance(key, slice):
+            raise TypeError('invalid type for key', key)
+
+        slice_from = key.start or self.span.start_from
+        slice_to = key.stop or self.span.finish_at
+        slice_span = Span(slice_from, slice_to)
+
+        if key.step is not None:
+            accounts = []
+            for subspan in slice_span.subspans(key.step):
+                new_account = TimeAccount(tags=[
+                    t for t in self.tags
+                    if t in subspan
+                ])
+                accounts.append(new_account)
+            return accounts
+
+        return TimeAccount(tags=[
+            t for t in self.tags
+            if t in slice_span
+        ])
+
+    def __iter__(self):
+        yield from self.tags
 
     def __eq__(self, other):
-        return all(
-            paired
-            for tag, paired in self.combined_with(other)
-        )
-
-    def _slice(
-        self, slice_from=None, slice_to=None,
-        direction=True,  # true is 'forward' from ref. of window
-        distinguish=1
-    ):
-        # TODO: build a real time slicer, temporal db style! this is it!
-        # (Instead we're just going to do some int-index stuff.)
-        return self.tags[::1 if direction else -1]
+        return all(paired for tag, paired in self.combined_with(other))
 
 
 class CombinedTimeAccount(TimeAccount):
@@ -64,14 +76,40 @@ class CombinedTimeAccount(TimeAccount):
 
 
 class Tag:
-
-    def __init__(self, name=None, valid_from=None, valid_to=None):
+    '''A tag on the timeline. Could be an event, could be an annotation.'''
+    def __init__(self, name=None, valid_from=None, valid_to=None, **data):
         self.name = self._validate_name(name)
         self.valid_from = valid_from
         self.valid_to = valid_to
+        self.data = data
 
     def _validate_name(self, name):
         return name or f"tag_{id(self)}"  # TODO don't leak memory address here
 
     def __repr__(self):
         return f"Tag('{self.name}')"
+
+
+class Span:
+    '''A span of time, to which tags may or may not belong. Utility class.'''
+    def __init__(self, start_from, finish_at):
+        self.start_from = start_from
+        self.finish_at = finish_at
+
+    def __contains__(self, tag):
+        return bool(
+            tag.valid_to > self.start_from and
+            tag.valid_from < self.finish_at
+        )
+
+    @property
+    def duration(self):
+        return self.finish_at - self.start_from
+
+    def subspans(self, duration):
+        '''yield Span() objects that fit within this span.'''
+        # TODO there has to be some fancy itertools way to do this
+        sliding_start = self.start_from
+        while sliding_start < self.finish_at:
+            yield Span(sliding_start, sliding_start + duration)
+            sliding_start += duration
