@@ -50,4 +50,14 @@ def test_describe_complex_topology(complex_account):
     accounts = list(complex_account[::two_hours])
     assert len(complex_account) == len(
         set(tag for account in accounts for tag in account)
-    )
+    ) == 4
+
+    # first subspan
+    assert(len(accounts[0])) == 3
+    assert accounts[0].span.begins_at == complex_account.tags[0].valid_from
+    assert accounts[0].span.finish_at == complex_account.tags[2].valid_to
+
+    # second subspan
+    assert(len(accounts[1])) == 2
+    assert accounts[1].span.begins_at == complex_account.tags[2].valid_from
+    assert accounts[1].span.finish_at == complex_account.tags[3].valid_to

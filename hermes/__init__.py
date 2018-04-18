@@ -17,10 +17,6 @@ class TimeAccount:
     def combined_with(self, other):
         return CombinedTimeAccount(self, other)
 
-    def __reversed__(self):
-        # TODO: don't create a whole new timeaccount, but rather query smarter
-        return TimeAccount(tags=self.tags[::-1])
-
     def __len__(self):
         return len(self.tags)
 
@@ -32,12 +28,10 @@ class TimeAccount:
         return Span(oldest.valid_from, most_recent.valid_to)
 
     def __getitem__(self, key):
-        if isinstance(key, Span):
-            slice_span = key
-        elif not isinstance(key, slice):
+        if not isinstance(key, slice):
             raise TypeError('invalid type for key', key)
 
-        slice_from = key.start or self.span.start_from
+        slice_from = key.start or self.span.begins_at
         slice_to = key.stop or self.span.finish_at
         slice_span = Span(slice_from, slice_to)
 
@@ -92,24 +86,20 @@ class Tag:
 
 class Span:
     '''A span of time, to which tags may or may not belong. Utility class.'''
-    def __init__(self, start_from, finish_at):
-        self.start_from = start_from
+    def __init__(self, begins_at, finish_at):
+        self.begins_at = begins_at
         self.finish_at = finish_at
 
     def __contains__(self, tag):
         return bool(
-            tag.valid_to > self.start_from and
+            tag.valid_to > self.begins_at and
             tag.valid_from < self.finish_at
         )
 
-    @property
-    def duration(self):
-        return self.finish_at - self.start_from
-
     def subspans(self, duration):
-        '''yield Span() objects that fit within this span.'''
+        '''yield Span objects that fit within this span.'''
         # TODO there has to be some fancy itertools way to do this
-        sliding_start = self.start_from
+        sliding_start = self.begins_at
         while sliding_start < self.finish_at:
             yield Span(sliding_start, sliding_start + duration)
             sliding_start += duration
