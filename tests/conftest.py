@@ -10,8 +10,7 @@ project_dir = current_dir / '..'
 if not (project_dir / 'Pipfile').exists():
     raise Exception('conftest.py could not configure PYTHONPATH')  # uhoh :(
 sys.path.append(str(project_dir))
-print(sys.path)
-
+print(f'Set PATH to {sys.path}')
 
 from fixtures.timeaccount import *  # noqa: E402
 

@@ -15,7 +15,7 @@ __all__ = [
 @pytest.fixture
 def simple_account():
     '''Blank account, very simple'''
-    return TimeAccount()
+    return TimeAccount([])
 
 
 @pytest.fixture
@@ -61,6 +61,4 @@ def complex_account_tags():
 @pytest.fixture
 def complex_account(complex_account_tags):
     '''An account with four main tags, for unit testing'''
-    account = TimeAccount()
-    account.tags = complex_account_tags
-    return account
+    return TimeAccount(complex_account_tags)
