@@ -1,3 +1,4 @@
+from functools import partial
 import inspect
 from pathlib import Path
 import pytest

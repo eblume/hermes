@@ -1,8 +1,7 @@
 import datetime as dt
 import pytest
 
-
-from hermes.timeaccount import TimeAccount, CombinedTimeAccount
+from hermes.timeaccount import BaseTimeAccount, TimeAccount, CombinedTimeAccount
 
 
 @pytest.mark.usefixtures('simple_account')
@@ -15,6 +14,21 @@ def test_cant_slice_with_nonsense(simple_account):
     with pytest.raises(TypeError) as excinfo:
         simple_account["friday"]
     assert excinfo.value.args == ("TimeAccount objects must be sliced with `datetime.datetime`", )
+
+
+def test_basetimeaccount():
+    with pytest.raises(NotImplementedError):
+        BaseTimeAccount()
+
+    class DummyClass(BaseTimeAccount):
+        def __init__(self):
+            pass
+
+    with pytest.raises(NotImplementedError):
+        DummyClass().tags
+
+    with pytest.raises(NotImplementedError):
+        len(DummyClass())  # __len__ itself doesn't error, but calls .tags
 
 
 @pytest.mark.usefixtures('complex_account')
@@ -76,6 +90,12 @@ def test_slice_without_step(complex_account):
     finish_at = complex_account.span.finish_at
     full_copy = complex_account[begins_at:finish_at]
     assert isinstance(full_copy, TimeAccount)
+
+
+@pytest.mark.usefixtures('complex_account')
+def test_slice_wrong_step_type(complex_account):
+    with pytest.raises(TypeError):
+        complex_account[::5]
 
 
 @pytest.mark.usefixtures('complex_account')
