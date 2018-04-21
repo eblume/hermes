@@ -2,6 +2,9 @@ import datetime as dt
 import pytest
 
 
+from hermes.timeaccount import TimeAccount, CombinedTimeAccount
+
+
 @pytest.mark.usefixtures('simple_account')
 def test_can_make_account(simple_account):
     assert len(simple_account) == 0
@@ -9,9 +12,9 @@ def test_can_make_account(simple_account):
 
 @pytest.mark.usefixtures('simple_account')
 def test_cant_slice_with_nonsense(simple_account):
-    with pytest.raises(AttributeError) as excinfo:
+    with pytest.raises(TypeError) as excinfo:
         simple_account["friday"]
-    assert excinfo.value.args == ("'str' object has no attribute 'start'",)
+    assert excinfo.value.args == ("TimeAccount objects must be sliced with `datetime.datetime`", )
 
 
 @pytest.mark.usefixtures('complex_account')
@@ -23,24 +26,26 @@ def test_describe_complex_topology(complex_account):
     # There are 4 tags active in this account
     assert len(complex_account) == 4
     # The 4 tags have 4 distinct names
-    assert len(set(tag.name for tag in complex_account)) == 4
+    assert len(set(tag.name for tag in complex_account.tags)) == 4
     # The 4 tags have 4 distinct start times
-    assert len(set(tag.valid_from for tag in complex_account)) == 4
+    assert len(set(tag.valid_from for tag in complex_account.tags)) == 4
     # The 4 tags have 3 distinct end times
-    assert len(set(tag.valid_to for tag in complex_account)) == 3
+    assert len(set(tag.valid_to for tag in complex_account.tags)) == 3
+    # The 4 tags are hashable and hashably unique
+    assert len(set(complex_account.tags)) == 4
 
     # time
     assert all(
         isinstance(tag.valid_from, dt.datetime)
-        for tag in complex_account
+        for tag in complex_account.tags
     )
     assert all(
         isinstance(tag.valid_to, dt.datetime)
-        for tag in complex_account
+        for tag in complex_account.tags
     )
     assert all(
         tag.valid_to >= tag.valid_from
-        for tag in complex_account
+        for tag in complex_account.tags
     )
 
     # divide the tags in the account in to groups of two hours length.
@@ -48,16 +53,36 @@ def test_describe_complex_topology(complex_account):
 
     two_hours = dt.timedelta(hours=2)
     accounts = list(complex_account[::two_hours])
-    assert len(complex_account) == len(
-        set(tag for account in accounts for tag in account)
-    ) == 4
+    assert len(accounts[0]) == 3
+    assert len(accounts[1]) == 2
+    combined = CombinedTimeAccount(*accounts)
+    assert len(combined) == 4
+    assert set(complex_account.tags) == set(combined.tags)
 
     # first subspan
     assert(len(accounts[0])) == 3
-    assert accounts[0].span.begins_at == complex_account.tags[0].valid_from
-    assert accounts[0].span.finish_at == complex_account.tags[2].valid_to
+    assert accounts[0].span.begins_at == complex_account.list_tags[0].valid_from
+    assert accounts[0].span.finish_at == complex_account.list_tags[2].valid_to
 
     # second subspan
     assert(len(accounts[1])) == 2
-    assert accounts[1].span.begins_at == complex_account.tags[2].valid_from
-    assert accounts[1].span.finish_at == complex_account.tags[3].valid_to
+    assert accounts[1].span.begins_at == complex_account.list_tags[2].valid_from
+    assert accounts[1].span.finish_at == complex_account.list_tags[3].valid_to
+
+
+@pytest.mark.usefixtures('complex_account')
+def test_slice_without_step(complex_account):
+    begins_at = complex_account.span.begins_at
+    finish_at = complex_account.span.finish_at
+    full_copy = complex_account[begins_at:finish_at]
+    assert isinstance(full_copy, TimeAccount)
+
+
+@pytest.mark.usefixtures('complex_account')
+def test_equality(complex_account):
+    begins_at = complex_account.span.begins_at
+    finish_at = complex_account.span.finish_at
+
+    assert complex_account == complex_account[begins_at:finish_at]
+    assert complex_account == complex_account[:]
+    assert complex_account != TimeAccount([])

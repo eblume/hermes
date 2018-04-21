@@ -1,7 +1,8 @@
 import datetime as dt
 import pytest
 
-from hermes import TimeAccount, Tag
+from hermes.timeaccount import TimeAccount
+from hermes.tag import Tag
 
 
 # list all of the fixtures - hacky, let's metaprogram this out
@@ -61,4 +62,4 @@ def complex_account_tags():
 @pytest.fixture
 def complex_account(complex_account_tags):
     '''An account with four main tags, for unit testing'''
-    return TimeAccount(complex_account_tags)
+    return TimeAccount(list_tags=complex_account_tags)

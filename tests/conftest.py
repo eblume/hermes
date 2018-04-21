@@ -12,6 +12,7 @@ if not (project_dir / 'Pipfile').exists():
 sys.path.append(str(project_dir))
 print(f'Set PATH to {sys.path}')
 
+
 from fixtures.timeaccount import *  # noqa: E402
 
 
