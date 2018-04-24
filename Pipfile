@@ -8,7 +8,7 @@ click = "*"
 attrs = "*"
 
 [dev-packages]
-pip = "*"
+pip = "==9.0.2"
 coverage = "*"
 pytest = "*"
 pipenv = ">=11.10"
@@ -18,6 +18,7 @@ pytest-xdist = "*"
 "pytest-pep8" = "*"
 pdbpp = "*"
 pygments = "*"
+black = "==18.4a2"
 
 [requires]
 python_version = "3.6"
