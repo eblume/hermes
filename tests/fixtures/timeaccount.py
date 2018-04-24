@@ -1,8 +1,7 @@
 import datetime as dt
 import pytest
 
-from hermes.timeaccount import TimeAccount
-from hermes.tag import Tag
+from hermes import TimeAccount, Tag
 
 
 # list all of the fixtures - hacky, let's metaprogram this out

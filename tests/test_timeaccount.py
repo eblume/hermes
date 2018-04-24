@@ -1,7 +1,7 @@
 import datetime as dt
 import pytest
 
-from hermes.timeaccount import BaseTimeAccount, TimeAccount, CombinedTimeAccount
+from hermes import BaseTimeAccount, TimeAccount, CombinedTimeAccount
 
 
 @pytest.mark.usefixtures('simple_account')

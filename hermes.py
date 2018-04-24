@@ -1,11 +1,29 @@
-import attr
+"""Hermes, the Time Accountant"""
+
+__author__ = """Erich Blume"""
+__email__ = 'blume.erich@gmail.com'
+__version__ = '0.1.1a'
+
+
 import datetime as dt
+import attr
+from functools import partial
+
+
+immutable = partial(attr.s, slots=True, frozen=True, auto_attribs=True, hash=True)
+
+@immutable
+class Tag:
+    '''A tag on the timeline. Could be an event, could be an annotation.'''
+    name: str
+    valid_from: dt.datetime
+    valid_to: dt.datetime
+
+
+import attr
 from operator import attrgetter
 from pprint import pformat
 from typing import Any, Iterable, List, Union, Set
-
-from .tag import Tag
-from .utils import immutable
 
 
 class BaseTimeAccount:
@@ -124,3 +142,5 @@ def _subclass_iface_error():
     return NotImplementedError(
         'subclasses of BaseTimeAccount must support the full interface'
     )
+
+
