@@ -4,10 +4,12 @@ __author__ = """Erich Blume"""
 __email__ = "blume.erich@gmail.com"
 __version__ = "0.1.1a"
 
-
 import datetime as dt
-import attr
 from functools import partial
+from operator import attrgetter
+from typing import Iterable, List, Set, Union
+
+import attr
 
 
 immutable = partial(attr.s, slots=True, frozen=True, auto_attribs=True, hash=True)
@@ -19,12 +21,6 @@ class Tag:
     name: str
     valid_from: dt.datetime
     valid_to: dt.datetime
-
-
-import attr
-from operator import attrgetter
-from pprint import pformat
-from typing import Any, Iterable, List, Union, Set
 
 
 class BaseTimeAccount:
@@ -139,7 +135,6 @@ class Span:
         sliding_start = self.begins_at
         while sliding_start < self.finish_at:
             yield Span(sliding_start, sliding_start + duration)
-
             sliding_start += duration
 
 

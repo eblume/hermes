@@ -19,6 +19,8 @@ pytest-xdist = "*"
 pdbpp = "*"
 pygments = "*"
 black = "==18.4a2"
+"flake8" = "*"
+"flake8-import-order" = "*"
 
 [requires]
 python_version = "3.6"
