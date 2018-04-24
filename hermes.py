@@ -135,6 +135,7 @@ class Span:
         sliding_start = self.begins_at
         while sliding_start < self.finish_at:
             yield Span(sliding_start, sliding_start + duration)
+
             sliding_start += duration
 
 
