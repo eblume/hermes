@@ -1,7 +1,8 @@
 import datetime as dt
-import pytest
 
-from hermes import BaseTimeAccount, TimeAccount, CombinedTimeAccount
+from hermes import BaseTimeAccount, CombinedTimeAccount, TimeAccount
+
+import pytest
 
 
 @pytest.mark.usefixtures("simple_account")
@@ -15,7 +16,7 @@ def test_cant_slice_with_nonsense(simple_account):
         simple_account["friday"]
     assert (
         excinfo.value.args
-        == ("TimeAccount objects must be sliced with `datetime.datetime`",)
+        == ("TimeAccount objects must be sliced with `datetime.datetime`")
     )
 
 
