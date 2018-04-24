@@ -31,15 +31,15 @@ def complex_account_tags():
     t2h = t0h + dt.timedelta(hours=2)
     t3h = t0h + dt.timedelta(hours=3)
     t4h = t0h + dt.timedelta(hours=4)
-    return [
+    return {
         Tag("Tag A", valid_from=t0h, valid_to=t2h),  # A tag from T=0 hours to T=1 hour
         Tag("Tag B", valid_from=t15, valid_to=t2h),  # a tag from T=1.5 to T=2
         Tag("Tag C", valid_from=t1h, valid_to=t3h),  # a tag from T=1 to T=3  (2 hours!)
         Tag("Tag D", valid_from=t2h, valid_to=t4h),  # a tag from T=2 to T=4
-    ]
+    }
 
 
 @pytest.fixture
 def complex_account(complex_account_tags):
     """An account with four main tags, for unit testing"""
-    return TimeAccount(list_tags=complex_account_tags)
+    return TimeAccount(complex_account_tags)
