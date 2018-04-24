@@ -46,3 +46,8 @@ def test_equality(complex_account):
 @pytest.mark.usefixtures("complex_account")
 def test_slice_syntaxes(complex_account):
     assert complex_account[:] == complex_account.slice(None, None)
+    assert len(complex_account[:]) == 4
+
+    past_half = complex_account.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
+    assert len(complex_account[past_half:]) == 2
+    assert complex_account[past_half:] == complex_account.slice(past_half, None)
