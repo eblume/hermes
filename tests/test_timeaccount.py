@@ -1,7 +1,7 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import TimeAccount, Span
+from hermes import Span, TimeAccount
 
 import pytest
 
@@ -125,7 +125,7 @@ def test_equality(complex_account):
 
 @pytest.mark.usefixtures("complex_account")
 def test_slice_syntaxes(complex_account):
-    assert complex_account[:] == complex_account.slice(None, None)
+    assert complex_account[:] == complex_account.reslice(None, None)
     assert len(complex_account[:]) == 4
     assert len({t for t in complex_account.tags}) == 4
     assert (
@@ -135,4 +135,4 @@ def test_slice_syntaxes(complex_account):
 
     past_half = complex_account.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
     assert len(complex_account[past_half:]) == 2
-    assert complex_account[past_half:] == complex_account.slice(past_half, None)
+    assert complex_account[past_half:] == complex_account.reslice(past_half, None)
