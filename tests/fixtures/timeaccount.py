@@ -19,23 +19,25 @@ def simple_account():
 def complex_account_tags():
     """Four main tags with various overlaps and data for unit testing"""
 
-    # tagname |  0 | 0.5|  1 | 1.5|  2 | 2.5|  3 | 3.5|  4
-    #  Tag A  |####|####|####|####|    |    |    |    |
-    #  Tag B  |    |    |    |####|    |    |    |    |
-    #  Tag C  |    |    |####|####|####|####|    |    |
-    #  Tag D  |    |    |    |    |####|####|####|####|
+    # tagname |  0 | 0.5|  1 | 1.5|  2 | 2.5|  3 | 3.5|  4 |
+    #  Tag A  |####|####|####|    |    |    |    |    |    |
+    #  Tag B  |    |####|####|    |    |    |    |    |    |
+    #  Tag C  |    |    |####|####|####|####|    |    |    |
+    #  Tag D  |    |    |    |    |    |####|####|####|####|
 
     t0h = dt.datetime(2018, 4, 16, 6, 43, 15, 13)  # when doesn't matter
+    t05 = t0h + dt.timedelta(hours=0, minutes=30)
     t1h = t0h + dt.timedelta(hours=1)
     t15 = t0h + dt.timedelta(hours=1, minutes=30)
     t2h = t0h + dt.timedelta(hours=2)
+    t25 = t0h + dt.timedelta(hours=2, minutes=30)
     t3h = t0h + dt.timedelta(hours=3)
     t4h = t0h + dt.timedelta(hours=4)
     return {
-        Tag("Tag A", valid_from=t0h, valid_to=t2h),  # A tag from T=0 hours to T=1 hour
-        Tag("Tag B", valid_from=t15, valid_to=t2h),  # a tag from T=1.5 to T=2
-        Tag("Tag C", valid_from=t1h, valid_to=t3h),  # a tag from T=1 to T=3  (2 hours!)
-        Tag("Tag D", valid_from=t2h, valid_to=t4h),  # a tag from T=2 to T=4
+        Tag("Tag A", valid_from=t0h, valid_to=t1h),
+        Tag("Tag B", valid_from=t05, valid_to=t1h),
+        Tag("Tag C", valid_from=t1h, valid_to=t25),
+        Tag("Tag D", valid_from=t25, valid_to=t4h),
     }
 
 
