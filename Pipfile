@@ -23,6 +23,7 @@ black = "==18.4a2"
 "flake8-import-order" = "*"
 pre-commit = "*"
 mypy = "*"
+factory-boy = "*"
 
 [requires]
 python_version = "3.6"
