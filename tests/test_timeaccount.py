@@ -1,7 +1,7 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import Span, Tag, TimeAccount
+from hermes import Category, Span, Tag, TimeAccount
 
 import pytest
 
@@ -30,11 +30,16 @@ def complex_account_tags():
     t25 = t0h + dt.timedelta(hours=2, minutes=30)
     # t3h = t0h + dt.timedelta(hours=3)
     t4h = t0h + dt.timedelta(hours=4)
+
+    a_cat = Category("A", None)
+    b_cat = Category("B", a_cat)
+    c_cat = Category("C", b_cat)
+
     return {
-        Tag("Tag A", valid_from=t0h, valid_to=t1h),
-        Tag("Tag B", valid_from=t05, valid_to=t1h),
-        Tag("Tag C", valid_from=t1h, valid_to=t25),
-        Tag("Tag D", valid_from=t25, valid_to=t4h),
+        Tag("Tag A", category=a_cat, valid_from=t0h, valid_to=t1h),
+        Tag("Tag B", category=b_cat, valid_from=t05, valid_to=t1h),
+        Tag("Tag C", category=c_cat, valid_from=t1h, valid_to=t25),
+        Tag("Tag D", category=a_cat, valid_from=t25, valid_to=t4h),
     }
 
 

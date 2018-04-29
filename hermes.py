@@ -35,6 +35,7 @@ class Spannable:
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class Tag(Spannable):
     name: str
+    category: Optional["Category"]
     valid_from: dt.datetime
     valid_to: dt.datetime
 
@@ -71,6 +72,10 @@ class Span(Spannable):
 
 
 class BaseTimeAccount(Spannable):
+
+    @property
+    def category_pool(self):
+        raise NotImplementedError("Subclasses must define this interface.")
 
     def iter_tags(self) -> Iterable["Tag"]:
         raise NotImplementedError("Subclasses must define this interface.")
@@ -129,6 +134,10 @@ class BaseTimeAccount(Spannable):
 class TimeAccount(BaseTimeAccount):
     tags: Set[Tag]
 
+    @property
+    def category_pool(self):
+        return CategoryPool(categories={tag.category for tag in self.iter_tags()})
+
     def iter_tags(self) -> Iterable["Tag"]:
         yield from self.tags
 
@@ -154,3 +163,20 @@ class TimeAccount(BaseTimeAccount):
     def combine(cls, *others: "BaseTimeAccount") -> "TimeAccount":
         tags = {t for other in others for t in other.iter_tags()}
         return TimeAccount(tags)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+class Category:
+    name: str
+    parent: Optional["Category"]
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+class CategoryPool:
+    """Pool of cached categories, searchable by name
+
+    >>> pool = account.category_pool
+    >>> sorted(cat.name for cat in pool.categories)
+    ['A', 'B', 'C']
+    """
+    categories: Set[Category]
