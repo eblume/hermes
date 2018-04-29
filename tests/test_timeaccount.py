@@ -175,9 +175,20 @@ def test_slice_syntaxes(complex_account):
     assert complex_account[past_half:] == complex_account.reslice(past_half, None)
 
 
+def test_category():
+    cat = Category("Test Category", None)
+    other_cat = cat / "Child"
+    assert other_cat.parent == cat
+    with pytest.raises(ValueError):
+        cat / "Bad Name!"
+
+
 def test_category_pool(complex_account):
     pool = complex_account.category_pool
     d_cat = pool.get_category("A/B/C/D")
     assert d_cat not in pool
     assert d_cat.parent in pool
     assert d_cat.parent is pool.get_category("A/B/C")
+
+    splat = sorted((fullpath, cat.name) for fullpath, cat in pool.categories.items())
+    assert splat == [("A", "A"), ("A/B", "B"), ("A/B/C", "C")]

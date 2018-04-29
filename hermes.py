@@ -144,9 +144,7 @@ class TimeAccount(BaseTimeAccount):
     def iter_tags(self) -> Iterable["Tag"]:
         yield from self.tags
 
-    def reslice(
-        self, begins_at: dt.datetime, finish_at: dt.datetime
-    ) -> "BaseTimeAccount":
+    def reslice(self, begins_at: dt.datetime, finish_at: dt.datetime) -> "TimeAccount":
         selfspan = self.span
         newspan = Span(
             begins_at if begins_at is not None else selfspan.begins_at,
@@ -181,15 +179,6 @@ class Category:
 
     def __truediv__(self, other: str):
         """Create a new category as a subcategory of this one.
-
-        >>> cat = Category("Test Category", None)
-        >>> other_cat = cat / "Child"
-        >>> other_cat.parent == cat
-        True
-        >>> cat / "Bad Name!"
-        Traceback (most recent call last):
-            ...
-        ValueError: Category name must match "[a-zA-Z][a-zA-Z0-9:\- ]*$"
         """
         return Category(other, parent=self)
 
@@ -205,10 +194,6 @@ class Category:
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class CategoryPool:
     """Pool of cached categories, searchable by name
-
-    >>> pool = timeline.category_pool
-    >>> sorted((fullpath, cat.name) for fullpath, cat in pool.categories.items())
-    [('A', 'A'), ('A/B', 'B'), ('A/B/C', 'C')]
     """
     categories: Mapping[str, Category]
 
@@ -221,14 +206,6 @@ class CategoryPool:
         `category_path` must be a "/"-seperated string. Each substring will be
         a category name. As much as possible, this will use categories already
         stored in the category pool, and then new categories will be constructed.
-
-        >>> d_cat = timeline.category_pool.get_category("A/B/C/D")
-        >>> d_cat in timeline.category_pool
-        False
-        >>> d_cat.parent in timeline.category_pool
-        True
-        >>> d_cat.parent is timeline.category_pool.get_category("A/B/C")
-        True
         """
         category_names = [name.strip() for name in category_path.split("/")]
         if not category_names:
