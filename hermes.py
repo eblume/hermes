@@ -83,6 +83,10 @@ class BaseTimeAccount(Spannable):
     def __len__(self):
         return len(list(self.iter_tags()))
 
+    # The next two overloads let mypy be comfortable with the abuse we're
+    # giving to python's slice syntax. It's clunky as hell, but that's the
+    # price you pay when you muck around with things like indexing.
+
     @overload
     def __getitem__(self, key: int) -> "BaseTimeAccount":
         pass
@@ -91,9 +95,9 @@ class BaseTimeAccount(Spannable):
     def __getitem__(self, key: slice) -> "BaseTimeAccount":
         pass
 
-    def __getitem__(
+    def __getitem__(  # noqa: F811
         self, key: Union[Optional[int], slice]
-    ) -> "BaseTimeAccount":  # noqa: F811
+    ) -> "BaseTimeAccount":
         # Do a little type casting safety dance. Let's find a better way.
         type_error = key is None
         type_error |= not isinstance(key, slice)
