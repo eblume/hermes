@@ -8,7 +8,7 @@ import datetime as dt
 import functools
 import re
 from operator import attrgetter
-from typing import Iterable, Optional, Set, Union, cast, overload
+from typing import Iterable, List, Mapping, Optional, Set, Union, cast, overload
 
 import attr
 
@@ -137,7 +137,9 @@ class TimeAccount(BaseTimeAccount):
 
     @property
     def category_pool(self):
-        return CategoryPool(categories={tag.category for tag in self.iter_tags()})
+        return CategoryPool(
+            categories={tag.category.fullpath: tag.category for tag in self.iter_tags()}
+        )
 
     def iter_tags(self) -> Iterable["Tag"]:
         yield from self.tags
@@ -191,13 +193,57 @@ class Category:
         """
         return Category(other, parent=self)
 
+    @property
+    def fullpath(self):
+        if self.parent is None:
+            return self.name
+
+        else:
+            return f"{self.parent.fullpath}/{self.name}"
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class CategoryPool:
     """Pool of cached categories, searchable by name
 
-    >>> pool = account.category_pool
-    >>> sorted(cat.name for cat in pool.categories)
-    ['A', 'B', 'C']
+    >>> pool = timeline.category_pool
+    >>> sorted((fullpath, cat.name) for fullpath, cat in pool.categories.items())
+    [('A', 'A'), ('A/B', 'B'), ('A/B/C', 'C')]
     """
-    categories: Set[Category]
+    categories: Mapping[str, Category]
+
+    def __contains__(self, category: Category) -> bool:
+        return category is not None and category.fullpath in self.categories
+
+    def get_category(self, category_path: str) -> Category:
+        """Return a Category using existing types stored in this pool.
+
+        `category_path` must be a "/"-seperated string. Each substring will be
+        a category name. As much as possible, this will use categories already
+        stored in the category pool, and then new categories will be constructed.
+
+        >>> d_cat = timeline.category_pool.get_category("A/B/C/D")
+        >>> d_cat in timeline.category_pool
+        False
+        >>> d_cat.parent in timeline.category_pool
+        True
+        >>> d_cat.parent is timeline.category_pool.get_category("A/B/C")
+        True
+        """
+        category_names = [name.strip() for name in category_path.split("/")]
+        if not category_names:
+            raise ValueError("Invalid category_path")
+
+        return self._get_category_inner(category_names)
+
+    def _get_category_inner(self, category_names: List[str]) -> Category:
+        category_path = "/".join(category_names)
+        if category_path in self.categories:
+            return self.categories[category_path]
+
+        else:
+            if len(category_names) > 1:
+                parent_cat = self._get_category_inner(category_names[:-1])
+            else:
+                parent_cat = None
+            return Category(category_names[0], parent_cat)

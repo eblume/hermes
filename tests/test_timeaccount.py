@@ -173,3 +173,11 @@ def test_slice_syntaxes(complex_account):
     past_half = complex_account.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
     assert len(complex_account[past_half:]) == 2
     assert complex_account[past_half:] == complex_account.reslice(past_half, None)
+
+
+def test_category_pool(complex_account):
+    pool = complex_account.category_pool
+    d_cat = pool.get_category("A/B/C/D")
+    assert d_cat not in pool
+    assert d_cat.parent in pool
+    assert d_cat.parent is pool.get_category("A/B/C")
