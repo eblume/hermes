@@ -1,17 +1,53 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import Span, TimeAccount
+from hermes import Span, Tag, TimeAccount
 
 import pytest
 
 
-@pytest.mark.usefixtures("simple_account")
+@pytest.fixture
+def simple_account():
+    """Blank account, very simple"""
+    return TimeAccount({})
+
+
+@pytest.fixture
+def complex_account_tags():
+    """Four main tags with various overlaps and data for unit testing"""
+
+    # tagname |  0 | 0.5|  1 | 1.5|  2 | 2.5|  3 | 3.5|  4 |
+    #  Tag A  |####|####|####|    |    |    |    |    |    |
+    #  Tag B  |    |####|####|    |    |    |    |    |    |
+    #  Tag C  |    |    |####|####|####|####|    |    |    |
+    #  Tag D  |    |    |    |    |    |####|####|####|####|
+
+    t0h = dt.datetime(2018, 4, 16, 6, 43, 15, 13)  # when doesn't matter
+    t05 = t0h + dt.timedelta(hours=0, minutes=30)
+    t1h = t0h + dt.timedelta(hours=1)
+    # t15 = t0h + dt.timedelta(hours=1, minutes=30)
+    # t2h = t0h + dt.timedelta(hours=2)
+    t25 = t0h + dt.timedelta(hours=2, minutes=30)
+    # t3h = t0h + dt.timedelta(hours=3)
+    t4h = t0h + dt.timedelta(hours=4)
+    return {
+        Tag("Tag A", valid_from=t0h, valid_to=t1h),
+        Tag("Tag B", valid_from=t05, valid_to=t1h),
+        Tag("Tag C", valid_from=t1h, valid_to=t25),
+        Tag("Tag D", valid_from=t25, valid_to=t4h),
+    }
+
+
+@pytest.fixture
+def complex_account(complex_account_tags):
+    """An account with four main tags, for unit testing"""
+    return TimeAccount(complex_account_tags)
+
+
 def test_can_make_account(simple_account):
     assert len(simple_account) == 0
 
 
-@pytest.mark.usefixtures("complex_account", "complex_account_tags")
 def test_describe_complex_topology(complex_account, complex_account_tags):
     # The purpose of this test was to write a descriptive test for the
     # complex_account fixture. As new tests need more complexity from
@@ -58,7 +94,6 @@ def test_describe_complex_topology(complex_account, complex_account_tags):
     assert accounts[1].span.finish_at == tags[3].valid_to
 
 
-@pytest.mark.usefixtures("complex_account")
 def test_subspans(complex_account):
     two_hours = dt.timedelta(hours=2)
 
@@ -71,7 +106,6 @@ def test_subspans(complex_account):
     assert spans[0].duration == spans[1].duration
 
 
-@pytest.mark.usefixtures("complex_account")
 def test_spans(complex_account):
     span = complex_account.span
     begins_plus5 = span.begins_at + dt.timedelta(minutes=5)
@@ -113,7 +147,6 @@ def test_spans(complex_account):
     assert Span(begins_plus5, begins_plus5) not in Span(begins_minus5, begins_minus5)
 
 
-@pytest.mark.usefixtures("complex_account")
 def test_equality(complex_account):
     begins_at = complex_account.span.begins_at
     finish_at = complex_account.span.finish_at
@@ -123,7 +156,6 @@ def test_equality(complex_account):
     assert complex_account != TimeAccount({})
 
 
-@pytest.mark.usefixtures("complex_account")
 def test_slice_syntaxes(complex_account):
     assert complex_account[:] == complex_account.reslice(None, None)
     assert len(complex_account[:]) == 4
