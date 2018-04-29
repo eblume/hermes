@@ -6,6 +6,7 @@ __version__ = "0.1.1a"
 
 import datetime as dt
 import functools
+import re
 from operator import attrgetter
 from typing import Iterable, Optional, Set, Union, cast, overload
 
@@ -167,8 +168,28 @@ class TimeAccount(BaseTimeAccount):
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class Category:
-    name: str
+    name: str = attr.ib()
     parent: Optional["Category"]
+
+    @name.validator
+    def _check_name(self, _, value: str):
+        pattern = r"[a-zA-Z][a-zA-Z0-9:\- ]*$"
+        if not re.match(pattern, value):
+            raise ValueError(f'Category name must match "{pattern}"')
+
+    def __truediv__(self, other: str):
+        """Create a new category as a subcategory of this one.
+
+        >>> cat = Category("Test Category", None)
+        >>> other_cat = cat / "Child"
+        >>> other_cat.parent == cat
+        True
+        >>> cat / "Bad Name!"
+        Traceback (most recent call last):
+            ...
+        ValueError: Category name must match "[a-zA-Z][a-zA-Z0-9:\- ]*$"
+        """
+        return Category(other, parent=self)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
