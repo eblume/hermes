@@ -239,5 +239,18 @@ def test_basetimeaccount_iface():
 
 
 def test_slicing_nonsense(complex_account):
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError) as excinfo:
+        complex_account[1]
+    assert "must be sliced with datetime" in str(excinfo.value)
+
+    with pytest.raises(TypeError) as excinfo:
         complex_account[1:3]
+    assert "must be sliced with datetime" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "path", ["☃", "/", " /foo", "/bar", "  ", "  //  / /", "\\ ", "\\"]
+)
+def test_category_badpath(path, complex_account):
+    with pytest.raises(ValueError):
+        complex_account.category_pool.get_category(path)

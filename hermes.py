@@ -205,7 +205,7 @@ class CategoryPool:
         stored in the category pool, and then new categories will be constructed.
         """
         category_names = [name.strip() for name in category_path.split("/")]
-        if not category_names:
+        if not category_names or not all(category_names):
             raise ValueError("Invalid category_path")
 
         return self._get_category_inner(category_names)
