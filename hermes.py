@@ -59,9 +59,6 @@ class Span(Spannable):
     def duration(self) -> dt.timedelta:
         return self.finish_at - self.begins_at
 
-    def __lt__(self, other: "Span") -> bool:
-        return self.duration < other.duration
-
     def subspans(self, duration: dt.timedelta) -> Iterable["Span"]:
         selfspan = self.span
         start = selfspan.begins_at

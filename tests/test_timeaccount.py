@@ -1,7 +1,7 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import Category, Span, Spannable, Tag, TimeAccount
+from hermes import BaseTimeAccount, Category, Span, Spannable, Tag, TimeAccount
 
 import pytest
 
@@ -198,3 +198,41 @@ def test_base_spannable_iface():
     span = Spannable()
     with pytest.raises(NotImplementedError):
         span.span
+
+
+def test_span_ordering():
+    now = dt.datetime.now()
+    span_left = Span(now, now + dt.timedelta(minutes=1))
+    span_right = Span(now + dt.timedelta(minutes=2), now + dt.timedelta(minutes=3))
+
+    assert span_left < span_right
+    assert span_right > span_left
+    assert span_left <= span_left
+    assert span_left >= span_left
+
+    assert not span_left > span_right
+    assert not span_right < span_left
+
+    overlap_right_of_left = Span(
+        span_left.begins_at + dt.timedelta(seconds=10),
+        span_left.finish_at + dt.timedelta(seconds=10),
+    )
+    overlap_left_of_right = Span(
+        span_right.begins_at - dt.timedelta(seconds=10),
+        span_right.finish_at - dt.timedelta(seconds=10),
+    )
+
+    assert span_left < overlap_right_of_left
+    assert span_right > overlap_left_of_right
+
+
+def test_basetimeaccount_iface():
+    account = BaseTimeAccount()
+    with pytest.raises(NotImplementedError):
+        account.category_pool
+
+    with pytest.raises(NotImplementedError):
+        account.iter_tags()
+
+    with pytest.raises(NotImplementedError):
+        account.reslice(None, None)
