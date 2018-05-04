@@ -91,11 +91,11 @@ class BaseTimeAccount(Spannable):
     # price you pay when you muck around with things like indexing.
 
     @overload
-    def __getitem__(self, key: int) -> "BaseTimeAccount":
+    def __getitem__(self, key: int) -> "BaseTimeAccount":  # pragma: no cover
         pass
 
     @overload  # noqa: F811
-    def __getitem__(self, key: slice) -> "BaseTimeAccount":
+    def __getitem__(self, key: slice) -> "BaseTimeAccount":  # pragma: no cover
         pass
 
     def __getitem__(  # noqa: F811
