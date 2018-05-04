@@ -236,3 +236,8 @@ def test_basetimeaccount_iface():
 
     with pytest.raises(NotImplementedError):
         account.reslice(None, None)
+
+
+def test_slicing_nonsense(complex_account):
+    with pytest.raises(TypeError):
+        complex_account[1:3]
