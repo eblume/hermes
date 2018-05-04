@@ -1,7 +1,7 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import Category, Span, Tag, TimeAccount
+from hermes import Category, Span, Spannable, Tag, TimeAccount
 
 import pytest
 
@@ -192,3 +192,9 @@ def test_category_pool(complex_account):
 
     splat = sorted((fullpath, cat.name) for fullpath, cat in pool.categories.items())
     assert splat == [("A", "A"), ("A/B", "B"), ("A/B/C", "C")]
+
+
+def test_base_spannable_iface():
+    span = Spannable()
+    with pytest.raises(NotImplementedError):
+        span.span
