@@ -29,4 +29,4 @@ factory-boy = "*"
 python_version = "3.6"
 
 [scripts]
-tests = "pytest tests"
+tests = "python -m pytest --cov=hermes --cov-report term-missing"

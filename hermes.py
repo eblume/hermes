@@ -78,6 +78,9 @@ class BaseTimeAccount(Spannable):
     def iter_tags(self) -> Iterable["Tag"]:
         raise NotImplementedError("Subclasses must define this interface.")
 
+    def filter(self, category: Union["Category", str]) -> "BaseTimeAccount":
+        raise NotImplementedError("Subclasses must define this interface.")
+
     def reslice(
         self, begins_at: dt.datetime, finish_at: dt.datetime
     ) -> "BaseTimeAccount":
@@ -157,6 +160,13 @@ class TimeAccount(BaseTimeAccount):
         most_recent = max(tags, key=attrgetter("valid_to"))
         return Span(oldest.valid_from, most_recent.valid_to)
 
+    def filter(self, category: Union["Category", str]) -> "BaseTimeAccount":
+        if isinstance(category, str):
+            category = self.category_pool.get_category(category)
+        cast(Category, category)
+
+        return TimeAccount(tags={tag for tag in self.iter_tags() if tag in category})
+
     @classmethod
     def combine(cls, *others: "BaseTimeAccount") -> "TimeAccount":
         tags = {t for other in others for t in other.iter_tags()}
@@ -186,6 +196,15 @@ class Category:
 
         else:
             return f"{self.parent.fullpath}/{self.name}"
+
+    def __contains__(self, tag: Tag) -> bool:
+        tag_cat = tag.category
+        while tag_cat is not None:
+            if tag_cat == self:
+                return True
+
+            tag_cat = tag_cat.parent
+        return False
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)

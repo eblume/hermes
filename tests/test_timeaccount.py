@@ -235,6 +235,9 @@ def test_basetimeaccount_iface():
         account.iter_tags()
 
     with pytest.raises(NotImplementedError):
+        account.filter(str())
+
+    with pytest.raises(NotImplementedError):
         account.reslice(None, None)
 
 
@@ -254,3 +257,7 @@ def test_slicing_nonsense(complex_account):
 def test_category_badpath(path, complex_account):
     with pytest.raises(ValueError):
         complex_account.category_pool.get_category(path)
+
+
+def test_query_by_category_filter(complex_account):
+    assert len(complex_account.filter("A/B")) == 2
