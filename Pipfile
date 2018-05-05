@@ -6,6 +6,7 @@ name = "pypi"
 [packages]
 click = "*"
 attrs = "*"
+google-api-python-client = "*"
 
 [dev-packages]
 pip = "==9.0.2"
