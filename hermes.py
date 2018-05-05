@@ -161,6 +161,9 @@ class TimeAccount(BaseTimeAccount):
         return Span(oldest.valid_from, most_recent.valid_to)
 
     def filter(self, category: Union["Category", str]) -> "BaseTimeAccount":
+        if category is None:
+            return self  # safe to return self due to immutability
+
         if isinstance(category, str):
             category = self.category_pool.get_category(category)
         cast(Category, category)

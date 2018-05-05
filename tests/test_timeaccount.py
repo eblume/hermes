@@ -261,3 +261,18 @@ def test_category_badpath(path, complex_account):
 
 def test_query_by_category_filter(complex_account):
     assert len(complex_account.filter("A/B")) == 2
+    assert len(complex_account.filter(None)) == 4
+    assert len(complex_account.filter("A/B").filter(None)) == 2
+    assert len(complex_account.filter("Not A Tag")) == 0
+
+
+def test_category_contains_with_none():
+    tag = Tag(
+        name="Foo",
+        category=None,
+        valid_from=dt.datetime.now(),
+        valid_to=dt.datetime.now(),
+    )
+    assert tag.category is None
+    other_category = Category("Bar", parent=None)
+    assert tag not in other_category
