@@ -102,3 +102,9 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# dat files
+*.dat
+
+# annotations file
+annotations.json

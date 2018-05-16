@@ -276,3 +276,11 @@ def test_category_contains_with_none():
     assert tag.category is None
     other_category = Category("Bar", parent=None)
     assert tag not in other_category
+
+
+def test_infinite_spans(complex_account):
+    span1 = Span(None, None)
+    span2 = Span(None, complex_account.span.finish_at)
+    assert span2 in span1
+    assert span1 in span2
+    assert span1.duration == span2.duration

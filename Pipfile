@@ -7,9 +7,11 @@ name = "pypi"
 click = "*"
 attrs = "*"
 google-api-python-client = "*"
+"oauth2client" = "*"
+python-dateutil = "*"
 
 [dev-packages]
-pip = "==9.0.2"
+pip = "==10.0.1"
 coverage = "*"
 pytest = "*"
 pipenv = ">=11.10"
@@ -25,6 +27,7 @@ black = "==18.4a2"
 pre-commit = "*"
 mypy = "*"
 factory-boy = "*"
+pytest-annotate = "*"
 
 [requires]
 python_version = "3.6"
