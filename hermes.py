@@ -7,8 +7,11 @@ __version__ = "0.1.1a"
 import datetime as dt
 import functools
 import re
+import sqlite3
 from operator import attrgetter
 from pathlib import Path
+from typing import Any
+from typing import Dict
 from typing import Iterable
 from typing import List
 from typing import Mapping
@@ -115,7 +118,7 @@ class BaseTimeAccount(Spannable):
         raise NotImplementedError("Subclasses must define this interface.")
 
     def reslice(
-        self, begins_at: dt.datetime, finish_at: dt.datetime
+        self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
     ) -> "BaseTimeAccount":
         raise NotImplementedError("Subclasses must define this interface.")
 
@@ -174,13 +177,17 @@ class TimeAccount(BaseTimeAccount):
     @property
     def category_pool(self):
         return CategoryPool(
-            categories={tag.category.fullpath: tag.category for tag in self.iter_tags()}
+            stored_categories={
+                tag.category.fullpath: tag.category for tag in self.iter_tags()
+            }
         )
 
     def iter_tags(self) -> Iterable["Tag"]:
         yield from self.tags
 
-    def reslice(self, begins_at: dt.datetime, finish_at: dt.datetime) -> "TimeAccount":
+    def reslice(
+        self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
+    ) -> "TimeAccount":
         selfspan = self.span
         newspan = Span(
             begins_at if begins_at is not None else selfspan.begins_at,
@@ -246,14 +253,18 @@ class Category:
         return False
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
-class CategoryPool:
-    """Pool of cached categories, searchable by name
-    """
-    categories: Mapping[str, Category]
+class BaseCategoryPool:
 
-    def __contains__(self, category: Category) -> bool:
-        return category is not None and category.fullpath in self.categories
+    @property
+    def categories(self) -> Mapping[str, Category]:
+        raise NotImplementedError("Subclasses must define this interface")
+
+    def __contains__(self, other: Any) -> bool:
+        if not isinstance(other, Category):
+            raise TypeError("CategoryPools contain only Category objects")
+
+        other = cast(Category, other)
+        return other.fullpath in self.categories
 
     def get_category(self, category_path: str) -> Category:
         """Return a Category using existing types stored in this pool.
@@ -278,6 +289,52 @@ class CategoryPool:
             if len(category_names) > 1:
                 parent_cat = self._get_category_inner(category_names[:-1])
             return Category(category_names[0], parent_cat)
+
+
+class MutableCategoryPool(BaseCategoryPool):
+
+    def __init__(self) -> None:
+        self._categories: Dict[str, Category] = {}
+
+    @property
+    def categories(self) -> Mapping[str, Category]:
+        return self._categories
+
+    def get_category(self, category_path: str, create: bool = False) -> Category:
+        if not create:
+            return super().get_category(category_path)
+
+        if category_path in self._categories:
+            return self._categories[category_path]
+
+        category_names = [name.strip() for name in category_path.split("/")]
+        if not category_names or not all(category_names):
+            raise ValueError("Invalid category_path")
+
+        return self._create_categories(category_names)
+
+    def _create_categories(self, category_names: List[str]) -> Category:
+        """category_names is assumed to NOT exist in the pool yet"""
+        parent_names = category_names[:-1]
+        parent_path = "/".join(parent_names)
+        parent: Optional[Category] = self._categories.get(parent_path, None)
+        if parent_path and not parent:
+            parent = self._create_categories(category_names[:-1])
+
+        category = Category(category_names[-1], parent)
+        self._categories["/".join(category_names)] = category
+        return category
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+class CategoryPool(BaseCategoryPool):
+    """Pool of cached categories, searchable by name
+    """
+    stored_categories: Mapping[str, Category]
+
+    @property
+    def categories(self) -> Mapping[str, Category]:
+        return self.stored_categories
 
 
 # TODO - move this to some sort of external/plugin system where we are more
@@ -309,7 +366,7 @@ class GoogleCalendarTimeAccount(BaseTimeAccount):
         return self._cached_acct.filter(category)
 
     def reslice(
-        self, begins_at: dt.datetime, finish_at: dt.datetime
+        self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
     ) -> "BaseTimeAccount":
         return self._cached_acct.reslice(begins_at, finish_at)
 
@@ -393,3 +450,100 @@ class GoogleCalendarTimeAccount(BaseTimeAccount):
             page_token = events.get("nextPageToken", None)
             if page_token is None:
                 break
+
+
+class SqliteTimeAccount(BaseTimeAccount):
+    """Sqlite-backed TimeAccount"""
+
+    # The goal for this implementation is that it should be a really solid
+    # performer for almost any use case, so long as the number of tags can
+    # reasonably fit in memory. This particular class is a good candidate for
+    # optimizations at the expense of readibility.
+
+    def __init__(self, tags: Optional[Iterable[Tag]] = None) -> None:
+        self._sqlite_db: sqlite3.Connection = sqlite3.connect(":memory:")
+        self._category_pool: MutableCategoryPool = MutableCategoryPool()
+
+        self._sqlite_db.row_factory = sqlite3.Row
+
+        with self._sqlite_db as conn:
+            conn.execute(
+                """
+            CREATE TABLE tags (
+                valid_from datetime,
+                valid_to datetime,
+                name text,
+                category text
+            )
+            """
+            )
+            conn.execute(
+                """
+            CREATE UNIQUE INDEX tags_idx ON tags (valid_from, valid_to, name)
+            """
+            )
+
+            if tags:
+                for tag in tags:
+                    self.insert(tag)
+
+    @property
+    def category_pool(self) -> CategoryPool:
+        return cast(CategoryPool, self._category_pool)
+
+    def iter_tags(self) -> Iterable["Tag"]:
+        cursor = self._sqlite_db.cursor()
+        result = cursor.execute("SELECT valid_from, valid_to, name, category FROM tags")
+        for row in result:
+            yield self._tag_from_row(row)
+
+    def filter(self, category: Union["Category", str]) -> "BaseTimeAccount":
+        if isinstance(category, str):
+            category = self._category_pool.get_category(category)
+
+        return SqliteTimeAccount(tags=[t for t in self.iter_tags() if t in category])
+
+    def reslice(
+        self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
+    ) -> "BaseTimeAccount":
+        tags = []
+        with self._sqlite_db as conn:
+            query = """
+            SELECT valid_from, valid_to, name, category
+            FROM tags
+            WHERE
+                (valid_to IS NULL AND valid_from IS NULL) OR
+                (valid_to IS NULL AND valid_from <= :finish_at) OR
+                (valid_to >= :begins_at AND valid_from IS NULL) OR
+                (valid_to >= :begins_at AND valid_from <= :finish_at)
+            """
+            result = conn.execute(
+                query, {"begins_at": begins_at, "finish_at": finish_at}
+            )
+            for row in result:
+                tags.append(self._tag_from_row(row))
+
+        return SqliteTimeAccount(tags=tags)
+
+    def _tag_from_row(self, row: sqlite3.Row) -> Tag:
+        category = self._category_pool.get_category(row["category"])
+        return Tag(
+            valid_from=date_parse(row["valid_from"]),
+            valid_to=date_parse(row["valid_to"]),
+            name=row["name"],
+            category=category,
+        )
+
+    def insert(self, tag: Tag) -> None:
+        with self._sqlite_db as conn:
+            category_str = tag.category.fullpath if tag.category else "sqlite3"
+            category = self._category_pool.get_category(category_str, create=True)
+            conn.execute(
+                "INSERT INTO tags VALUES (:valid_from, :valid_to, :name, :category)",
+                {
+                    "valid_from": tag.valid_from,
+                    "valid_to": tag.valid_to,
+                    "name": tag.name,
+                    "category": category.fullpath,
+                },
+            )

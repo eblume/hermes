@@ -1,7 +1,13 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import BaseTimeAccount, Category, Span, Spannable, Tag, TimeAccount
+from hermes import BaseTimeAccount
+from hermes import Category
+from hermes import Span
+from hermes import Spannable
+from hermes import SqliteTimeAccount
+from hermes import Tag
+from hermes import TimeAccount
 
 import pytest
 
@@ -47,6 +53,11 @@ def complex_account_tags():
 def complex_account(complex_account_tags):
     """An account with four main tags, for unit testing"""
     return TimeAccount(complex_account_tags)
+
+
+@pytest.fixture
+def sqlite_account(complex_account_tags):
+    return SqliteTimeAccount(complex_account_tags)
 
 
 def test_can_make_account(simple_account):
@@ -284,3 +295,14 @@ def test_infinite_spans(complex_account):
     assert span2 in span1
     assert span1 in span2
     assert span1.duration == span2.duration
+
+
+def test_sqlite_backend(complex_account, sqlite_account):
+    assert len(sqlite_account) == len(complex_account)
+    assert (
+        sqlite_account.category_pool.categories
+        == complex_account.category_pool.categories
+    )
+    sqlite_tags = set(sqlite_account.iter_tags())
+    base_tags = set(complex_account.iter_tags())
+    assert sqlite_tags == base_tags
