@@ -21,6 +21,8 @@ from typing import Union
 from typing import cast
 from typing import overload
 
+from appdirs import user_data_dir  # type: ignore
+
 import attr
 
 from dateutil.parser import parse as date_parse
@@ -352,8 +354,7 @@ class GoogleCalendarTimeAccount(BaseTimeAccount):
     """
 
     def __init__(self):
-        # TODO - oauth config specification in init!
-        self._cached_acct: TimeAccount = type(self).load_gcal()
+        self._cached_acct: BaseTimeAccount = type(self).load_gcal()
 
     @property
     def category_pool(self) -> CategoryPool:
@@ -371,10 +372,34 @@ class GoogleCalendarTimeAccount(BaseTimeAccount):
         return self._cached_acct.reslice(begins_at, finish_at)
 
     @classmethod
-    def load_gcal(cls) -> TimeAccount:
+    def load_gcal(
+        cls,
+        oauth_config: Optional[Path] = None,
+        base_category: Category = Category("GCal", None),
+    ) -> BaseTimeAccount:
+        """Create a TimeAccount from the specified `ouath_config` file.
+
+        `oauth_config` should be a file that contains google OAuth
+        credentials. Currently, ALL calendar events from ALL calendars are
+        downloaded, but filtering options will be available in the future. If
+        left as `None`, the default will be used from `appdirs`, which uses
+        OS-aware configuration directory schemes. See `appdir` for more
+        information. The default config file must be named `'gcal.json'` inside
+        the `user_data_dir()`, which is typically one of:
+
+        'C:\\Users\\erich\\AppData\\Local\\Hermes\\HermesCLI'
+        '/home/erich/.config/hermescli'
+        '/Users/erich/Library/Application Support/HermesCLI'
+        """
+        appname = "HermesCLI"
+        appauthor = "Hermes"
         service_name = "calendar"
         version = "v3"
-        client_secrets = str(Path("~/.config/hermes/gcal.json").expanduser())
+
+        if oauth_config is None:
+            config_dir: str = user_data_dir(appname, appauthor)
+            oauth_config = Path(config_dir) / "gcal.json"
+        client_secrets = str(oauth_config)
         flow = oauth2_client.flow_from_clientsecrets(
             client_secrets,
             scope="https://www.googleapis.com/auth/calendar.readonly",
@@ -390,8 +415,8 @@ class GoogleCalendarTimeAccount(BaseTimeAccount):
         # TODO - support offline discovery file
         # (see discovery.build_from_document)
         service = discovery.build(service_name, version, http=http)
-        return TimeAccount(
-            set(cls._tag_events_from_service(Category("GCal", None), service))
+        return SqliteTimeAccount(
+            set(cls._tag_events_from_service(base_category, service))
         )
 
     @classmethod
@@ -469,13 +494,13 @@ class SqliteTimeAccount(BaseTimeAccount):
         with self._sqlite_db as conn:
             conn.execute(
                 """
-            CREATE TABLE tags (
-                valid_from datetime,
-                valid_to datetime,
-                name text,
-                category text
-            )
-            """
+                CREATE TABLE tags (
+                    valid_from datetime,
+                    valid_to datetime,
+                    name text,
+                    category text
+                )
+                """
             )
             conn.execute(
                 """
