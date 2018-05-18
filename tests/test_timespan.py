@@ -1,13 +1,9 @@
 import datetime as dt
 from operator import attrgetter
 
-from hermes import BaseTimeAccount
-from hermes import Category
-from hermes import Span
-from hermes import Spannable
-from hermes import SqliteTimeAccount
-from hermes import Tag
-from hermes import TimeAccount
+from hermes.span import Span, Spannable
+from hermes.tag import Category, Tag
+from hermes.timespan import BaseTimeSpan, SqliteTimeSpan, TimeSpan
 
 import pytest
 
@@ -15,7 +11,7 @@ import pytest
 @pytest.fixture
 def simple_account():
     """Blank account, very simple"""
-    return TimeAccount({})
+    return TimeSpan({})
 
 
 @pytest.fixture
@@ -52,12 +48,12 @@ def complex_account_tags():
 @pytest.fixture
 def complex_account(complex_account_tags):
     """An account with four main tags, for unit testing"""
-    return TimeAccount(complex_account_tags)
+    return TimeSpan(complex_account_tags)
 
 
 @pytest.fixture
 def sqlite_account(complex_account_tags):
-    return SqliteTimeAccount(complex_account_tags)
+    return SqliteTimeSpan(complex_account_tags)
 
 
 def test_can_make_account(simple_account):
@@ -93,7 +89,7 @@ def test_describe_complex_topology(complex_account, complex_account_tags):
     assert len(accounts) == 2
     assert len(accounts[0]) == 3
     assert len(accounts[1]) == 2
-    combined = TimeAccount.combine(*accounts)
+    combined = TimeSpan.combine(*accounts)
     assert len(combined) == 4
     assert set(complex_account.tags) == set(combined.tags)
 
@@ -169,7 +165,7 @@ def test_equality(complex_account):
 
     assert complex_account == complex_account[begins_at:finish_at]
     assert complex_account == complex_account[:]
-    assert complex_account != TimeAccount({})
+    assert complex_account != TimeSpan({})
 
 
 def test_slice_syntaxes(complex_account):
@@ -238,7 +234,7 @@ def test_span_ordering():
 
 
 def test_basetimeaccount_iface():
-    account = BaseTimeAccount()
+    account = BaseTimeSpan()
     with pytest.raises(NotImplementedError):
         account.category_pool
 
