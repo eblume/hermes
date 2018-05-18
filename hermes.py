@@ -127,19 +127,6 @@ class BaseTimeAccount(Spannable):
     def __len__(self):
         return len(list(self.iter_tags()))
 
-    # The next two overloads let mypy be comfortable with the abuse
-    # we're giving to python's slice syntax. It's clunky as hell,
-    # but that's the price you pay when you muck around with things
-    # like indexing.
-
-    @overload
-    def __getitem__(self, key: int) -> "BaseTimeAccount":  # pragma: no cover
-        pass
-
-    @overload  # noqa: F811
-    def __getitem__(self, key: slice) -> "BaseTimeAccount":  # pragma: no cover
-        pass
-
     def __getitem__(  # noqa: F811
         self, key: Union[Optional[int], slice]
     ) -> "BaseTimeAccount":
