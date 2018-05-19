@@ -1,52 +1,20 @@
 Hermes
 ======
 
-About Hermes
-------------
-Hermes is the project name for an automated personal assistant framework
-thatour I am developing. Hermes is a component in that system, and is
-responsible for handling the accounting of time. Hermes understands the world
-through slices of time.
+by Erich Blume (blume.erich@gmail.com)
 
-Time Slices
------------
-
-A time slice is a span of time, possibly with 0 'width' or 'duration' (a
-special case that denotes a single instant, and which for convenience can often
-be represented as a `datetime.datetime` object).
-
-Given any single slice of time, Hermes will return a TimeAccount. Exactly how
-Hermes decides on this time account is an implementation detail of Hermes, but
-it is important to note that Hermes is happy returning slices that slice from
-the past in to the future. (Accounting of future time is, obviously, the realm
-of the automated assistants mentioned previously.)
-
-Time Account
-------------
-
-A Time Account is an object that is sliceable by a Time Slice. When returned
-from Hermes, a Time Account is typically only defined on the interval that
-Hermes was given (although in some cases the Time Account may be sliced further
-on either end, but this is not necessarily a supported case.) A Time Account
-can also be indexed via a 0-width time slice or a `datetime.datetime`. A sliced
-Time Account simply returns a new Time Account for just that period. Typically
-this results in an more narrowly parsed account of time, but note that
-**slicing a time account can change the level of detail in the annotations
-returned by a Time Account**.
-
-Details of how to read a full Time Account are found elsewhere (TODO), but
-there will be helper functions to read time accounts out to a variety of
-serializations including a simple string (even `str` works!)
+This project contains the code for Hermes, which is a Time Accountant. That is
+to say, Hermes is a set of tools for managing time. The scope of Hermes is
+quite large, but right now this project primarily provides `hermes`, which is a
+python package for manipulating, building, querying, filtering, and tabulating
+timespans.
 
 How to use Hermes
 -----------------
 
-Currently, Hermes is a library which implements the Hermes interface summarized
-above as a **deterministic, finite state machine**. Plans exist to extend
-Hermes to use neural network with live retraining based on the Stress
-parameter, for more on this see Long Term Vision.
+TODO - expand this documentation! Please seen CONTRIBUTING.rst.
 
-(TODO - basic useage w/examples).
+For now, please check out the `tests` directory for usage examples.
 
 Hermes' Design
 --------------
@@ -117,8 +85,4 @@ The automatons... are a whole thing. I'll need to document them another time.
 Modifying / Licensing
 =====================
 
-Currently, no special license is available. I retain full copyright. I plan on
-placing this code in some sort of open source license in the future, but I want
-to put thought in to which one to use. Please contact me with questions if you
-have any in the mean time. Just include LICENSING in the subject line so I know
-what it's about. Thanks!
+Please see LICENSE and CONTRIBUTING.rst
