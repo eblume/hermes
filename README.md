@@ -1,7 +1,5 @@
 Hermes
 ======
-copyright Erich Blume <blume.erich@gmail.com> 2018
-
 
 About Hermes
 ------------
@@ -124,5 +122,3 @@ placing this code in some sort of open source license in the future, but I want
 to put thought in to which one to use. Please contact me with questions if you
 have any in the mean time. Just include LICENSING in the subject line so I know
 what it's about. Thanks!
-
-
