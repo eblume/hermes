@@ -12,7 +12,7 @@ python-dateutil = "*"
 appdirs = "*"
 
 [dev-packages]
-pip = "==10.0.1"
+pip = "==9.0.3"
 coverage = "*"
 pytest = "*"
 pipenv = ">=11.10"
