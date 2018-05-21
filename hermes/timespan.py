@@ -115,7 +115,20 @@ class TimeSpan(BaseTimeSpan):
         return TimeSpan(tags)
 
 
-class SqliteTimeSpan(BaseTimeSpan):
+class InsertableTimeSpan(BaseTimeSpan):
+
+    def insert_tag(self, tag: Tag) -> None:
+        raise NotImplementedError("Subclasses must define this interface.")
+
+
+class RemovableTimeSpan(BaseTimeSpan):
+
+    def remove_tag(self, tag: Tag) -> bool:
+        """Remove the specified tag. Return true iff the tag was found."""
+        raise NotImplementedError("Subclasses must define this interface.")
+
+
+class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
     """Sqlite-backed TimeSpan"""
 
     # The goal for this implementation is that it should be a really solid
@@ -148,7 +161,33 @@ class SqliteTimeSpan(BaseTimeSpan):
 
             if tags:
                 for tag in tags:
-                    self.insert(tag)
+                    self.insert_tag(tag)
+
+    def insert_tag(self, tag: Tag) -> None:
+        with self._sqlite_db as conn:
+            category_str = tag.category.fullpath if tag.category else "sqlite3"
+            category = self._category_pool.get_category(category_str, create=True)
+            conn.execute(
+                "INSERT INTO tags VALUES (:valid_from, :valid_to, :name, :category)",
+                {
+                    "valid_from": tag.valid_from,
+                    "valid_to": tag.valid_to,
+                    "name": tag.name,
+                    "category": category.fullpath,
+                },
+            )
+
+    def remove_tag(self, tag: Tag) -> bool:
+        with self._sqlite_db as conn:
+            conn.execute(
+                "DELETE FROM tags WHERE valid_from = :valid_from, valid_to = :valid_to, name = :name",
+                {
+                    "valid_from": tag.valid_from,
+                    "valid_to": tag.valid_to,
+                    "name": tag.name,
+                },
+            )
+        return True  # TODO
 
     @property
     def category_pool(self) -> BaseCategoryPool:
@@ -196,17 +235,3 @@ class SqliteTimeSpan(BaseTimeSpan):
             name=row["name"],
             category=category,
         )
-
-    def insert(self, tag: Tag) -> None:
-        with self._sqlite_db as conn:
-            category_str = tag.category.fullpath if tag.category else "sqlite3"
-            category = self._category_pool.get_category(category_str, create=True)
-            conn.execute(
-                "INSERT INTO tags VALUES (:valid_from, :valid_to, :name, :category)",
-                {
-                    "valid_from": tag.valid_from,
-                    "valid_to": tag.valid_to,
-                    "name": tag.name,
-                    "category": category.fullpath,
-                },
-            )
