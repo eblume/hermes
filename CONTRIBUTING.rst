@@ -62,6 +62,10 @@ Ready to contribute? Here's how to set up `hermes` for local development::
 $ pipenv update
 $ pipenv run tests
 
+You may also need this to get `pre-commit` installed in your git hooks::
+
+$ pre-commit install
+
 That's it! Once the tests pass, you'll know you've got a fully functioning
 development environment. There are some requirements you will need to install
 first:

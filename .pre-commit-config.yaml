@@ -1,7 +1,31 @@
 repos:
 -   repo: https://github.com/ambv/black
-    rev: stable
+    rev: 18.5b0
     hooks:
     - id: black
       args: [--safe]
       python_version: python3.6
+-   repo: git://github.com/pre-commit/pre-commit-hooks
+    sha: v1.2.3  # Use the ref you want to point at
+    hooks:
+    -   id: trailing-whitespace
+    -   id: check-added-large-files
+    -   id: check-ast
+    -   id: check-builtin-literals
+    -   id: check-byte-order-marker
+    -   id: check-case-conflict
+    -   id: check-docstring-first
+    -   id: check-executables-have-shebangs
+    -   id: check-merge-conflict
+    -   id: check-symlinks
+    -   id: check-vcs-permalinks
+    -   id: check-json
+    -   id: check-xml
+    -   id: check-yaml
+    -   id: debug-statements
+    -   id: detect-private-key
+    -   id: fix-encoding-pragma
+    -   id: flake8
+    -   id: forbid-new-submodules
+    -   id: mixed-line-ending
+    -   id: trailing-whitespace
