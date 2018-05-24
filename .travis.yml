@@ -13,4 +13,4 @@ install:
 
 script:
     - pipenv run tests
-    - black --check --diff
+    - black --check
