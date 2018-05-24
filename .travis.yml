@@ -4,12 +4,11 @@ sudo: false
 
 python:
     - 3.6
-    - 3.5
 
 install:
     - pip install pipenv
     - pipenv lock
-    - pipenv install -d --keep-outdated -v
+    - pipenv install --dev
 
 script:
     - pipenv run tests
