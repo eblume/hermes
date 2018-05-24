@@ -9,12 +9,15 @@ quite large, but right now this project primarily provides `hermes`, which is a
 python package for manipulating, building, querying, filtering, and tabulating
 timespans.
 
+[![Build Status](https://travis-ci.com/eblume/hermes.svg?branch=master)](https://travis-ci.com/eblume/hermes)
+
 How to use Hermes
 -----------------
 
 TODO - expand this documentation! Please seen CONTRIBUTING.rst.
 
 For now, please check out the `tests` directory for usage examples.
+
 
 Modifying / Licensing
 =====================
