@@ -2,6 +2,7 @@
 import datetime as dt
 from operator import attrgetter
 
+from hermes.categorypool import BaseCategoryPool, MutableCategoryPool
 from hermes.span import Span, Spannable
 from hermes.tag import Category, Tag
 from hermes.timespan import BaseTimeSpan, SqliteTimeSpan, TimeSpan
@@ -9,14 +10,14 @@ from hermes.timespan import BaseTimeSpan, SqliteTimeSpan, TimeSpan
 import pytest
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def simple_account():
     """Blank account, very simple"""
     return TimeSpan({})
 
 
-@pytest.fixture
-def complex_account_tags():
+@pytest.fixture(scope="module")
+def complex_timespan_tags():
     """Four main tags with various overlaps and data for unit testing"""
 
     # tagname |  0 | 0.5|  1 | 1.5|  2 | 2.5|  3 | 3.5|  4 |
@@ -46,55 +47,55 @@ def complex_account_tags():
     }
 
 
-@pytest.fixture
-def complex_account(complex_account_tags):
+@pytest.fixture(scope="module")
+def complex_timespan(complex_timespan_tags):
     """An account with four main tags, for unit testing"""
-    return TimeSpan(complex_account_tags)
+    return TimeSpan(complex_timespan_tags)
 
 
-@pytest.fixture
-def sqlite_account(complex_account_tags):
-    return SqliteTimeSpan(complex_account_tags)
+@pytest.fixture(scope="function")
+def sqlite_timespan(complex_timespan_tags):
+    return SqliteTimeSpan(tags=complex_timespan_tags)
 
 
 def test_can_make_account(simple_account):
     assert len(simple_account) == 0
 
 
-def test_describe_complex_topology(complex_account, complex_account_tags):
+def test_describe_complex_topology(complex_timespan, complex_timespan_tags):
     # The purpose of this test was to write a descriptive test for the
-    # complex_account fixture. As new tests need more complexity from
-    # complex_account, we will add to this test (or other tests related to it)
+    # complex_timespan fixture. As new tests need more complexity from
+    # complex_timespan, we will add to this test (or other tests related to it)
 
     # There are 4 tags active in this account
-    assert len(complex_account) == 4
+    assert len(complex_timespan) == 4
     # The 4 tags have 4 distinct names
-    assert len(set(tag.name for tag in complex_account.tags)) == 4
+    assert len(set(tag.name for tag in complex_timespan.tags)) == 4
     # The 4 tags have 4 distinct start times
-    assert len(set(tag.valid_from for tag in complex_account.tags)) == 4
+    assert len(set(tag.valid_from for tag in complex_timespan.tags)) == 4
     # The 4 tags have 3 distinct end times
-    assert len(set(tag.valid_to for tag in complex_account.tags)) == 3
+    assert len(set(tag.valid_to for tag in complex_timespan.tags)) == 3
     # The 4 tags are hashable and hashably unique
-    assert len(set(complex_account.tags)) == 4
+    assert len(set(complex_timespan.tags)) == 4
 
     # time
-    assert all(isinstance(tag.valid_from, dt.datetime) for tag in complex_account.tags)
-    assert all(isinstance(tag.valid_to, dt.datetime) for tag in complex_account.tags)
-    assert all(tag.valid_to >= tag.valid_from for tag in complex_account.tags)
+    assert all(isinstance(tag.valid_from, dt.datetime) for tag in complex_timespan.tags)
+    assert all(isinstance(tag.valid_to, dt.datetime) for tag in complex_timespan.tags)
+    assert all(tag.valid_to >= tag.valid_from for tag in complex_timespan.tags)
 
     # divide the tags in the account in to groups of two hours length.
     # (see test/fixtures/timeaccount.py for the layout reference)
 
     two_hours = dt.timedelta(hours=2)
-    accounts = list(complex_account.subspans(two_hours))
+    accounts = list(complex_timespan.subspans(two_hours))
     assert len(accounts) == 2
     assert len(accounts[0]) == 3
     assert len(accounts[1]) == 2
     combined = TimeSpan.combine(*accounts)
     assert len(combined) == 4
-    assert set(complex_account.tags) == set(combined.tags)
+    assert set(complex_timespan.tags) == set(combined.tags)
 
-    tags = list(sorted(complex_account.tags, key=attrgetter("valid_from")))
+    tags = list(sorted(complex_timespan.tags, key=attrgetter("valid_from")))
 
     # first subspan
     assert len(accounts[0]) == 3
@@ -107,20 +108,20 @@ def test_describe_complex_topology(complex_account, complex_account_tags):
     assert accounts[1].span.finish_at == tags[3].valid_to
 
 
-def test_subspans(complex_account):
+def test_subspans(complex_timespan):
     two_hours = dt.timedelta(hours=2)
 
     # Span subspanning
-    spans = list(complex_account.span.subspans(two_hours))
+    spans = list(complex_timespan.span.subspans(two_hours))
     for span in spans:
         assert span.duration <= two_hours
-    assert Span(spans[0].begins_at, spans[1].finish_at) == complex_account.span
+    assert Span(spans[0].begins_at, spans[1].finish_at) == complex_timespan.span
     assert spans[0].finish_at == spans[1].begins_at
     assert spans[0].duration == spans[1].duration
 
 
-def test_spans(complex_account):
-    span = complex_account.span
+def test_spans(complex_timespan):
+    span = complex_timespan.span
     begins_plus5 = span.begins_at + dt.timedelta(minutes=5)
     begins_minus5 = span.begins_at - dt.timedelta(minutes=5)
     finish_plus5 = span.finish_at + dt.timedelta(minutes=5)
@@ -160,27 +161,27 @@ def test_spans(complex_account):
     assert Span(begins_plus5, begins_plus5) not in Span(begins_minus5, begins_minus5)
 
 
-def test_equality(complex_account):
-    begins_at = complex_account.span.begins_at
-    finish_at = complex_account.span.finish_at
+def test_equality(complex_timespan):
+    begins_at = complex_timespan.span.begins_at
+    finish_at = complex_timespan.span.finish_at
 
-    assert complex_account == complex_account[begins_at:finish_at]
-    assert complex_account == complex_account[:]
-    assert complex_account != TimeSpan({})
+    assert complex_timespan == complex_timespan[begins_at:finish_at]
+    assert complex_timespan == complex_timespan[:]
+    assert complex_timespan != TimeSpan({})
 
 
-def test_slice_syntaxes(complex_account):
-    assert complex_account[:] == complex_account.reslice(None, None)
-    assert len(complex_account[:]) == 4
-    assert len({t for t in complex_account.tags}) == 4
+def test_slice_syntaxes(complex_timespan):
+    assert complex_timespan[:] == complex_timespan.reslice(None, None)
+    assert len(complex_timespan[:]) == 4
+    assert len({t for t in complex_timespan.tags}) == 4
     assert (
-        {t for t in complex_account.tags if t in complex_account.span}
-        == complex_account.tags
+        {t for t in complex_timespan.tags if t in complex_timespan.span}
+        == complex_timespan.tags
     )
 
-    past_half = complex_account.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
-    assert len(complex_account[past_half:]) == 2
-    assert complex_account[past_half:] == complex_account.reslice(past_half, None)
+    past_half = complex_timespan.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
+    assert len(complex_timespan[past_half:]) == 2
+    assert complex_timespan[past_half:] == complex_timespan.reslice(past_half, None)
 
 
 def test_category():
@@ -191,8 +192,8 @@ def test_category():
         cat / "Bad Name!"
 
 
-def test_category_pool(complex_account):
-    pool = complex_account.category_pool
+def test_category_pool(complex_timespan):
+    pool = complex_timespan.category_pool
     d_cat = pool.get_category("A/B/C/D")
     assert d_cat not in pool
     assert d_cat.parent in pool
@@ -200,6 +201,24 @@ def test_category_pool(complex_account):
 
     splat = sorted((fullpath, cat.name) for fullpath, cat in pool.categories.items())
     assert splat == [("A", "A"), ("A/B", "B"), ("A/B/C", "C")]
+
+
+def test_base_category_pool_iface():
+    pool = BaseCategoryPool()
+    with pytest.raises(NotImplementedError):
+        pool.categories
+
+    with pytest.raises(TypeError):
+        "foo" in pool
+
+    with pytest.raises(ValueError):
+        pool.get_category("")
+
+
+def test_mutable_category_pool():
+    pool = MutableCategoryPool()
+    with pytest.raises(ValueError):
+        pool.get_category("", True)
 
 
 def test_base_spannable_iface():
@@ -249,29 +268,29 @@ def test_basetimeaccount_iface():
         account.reslice(None, None)
 
 
-def test_slicing_nonsense(complex_account):
+def test_slicing_nonsense(complex_timespan):
     with pytest.raises(TypeError) as excinfo:
-        complex_account[1]
+        complex_timespan[1]
     assert "must be sliced with datetime" in str(excinfo.value)
 
     with pytest.raises(TypeError) as excinfo:
-        complex_account[1:3]
+        complex_timespan[1:3]
     assert "must be sliced with datetime" in str(excinfo.value)
 
 
 @pytest.mark.parametrize(
     "path", ["☃", "/", " /foo", "/bar", "  ", "  //  / /", "\\ ", "\\"]
 )
-def test_category_badpath(path, complex_account):
+def test_category_badpath(path, complex_timespan):
     with pytest.raises(ValueError):
-        complex_account.category_pool.get_category(path)
+        complex_timespan.category_pool.get_category(path)
 
 
-def test_query_by_category_filter(complex_account):
-    assert len(complex_account.filter("A/B")) == 2
-    assert len(complex_account.filter(None)) == 4
-    assert len(complex_account.filter("A/B").filter(None)) == 2
-    assert len(complex_account.filter("Not A Tag")) == 0
+def test_query_by_category_filter(complex_timespan):
+    assert len(complex_timespan.filter("A/B")) == 2
+    assert len(complex_timespan.filter(None)) == 4
+    assert len(complex_timespan.filter("A/B").filter(None)) == 2
+    assert len(complex_timespan.filter("Not A Tag")) == 0
 
 
 def test_category_contains_with_none():
@@ -286,20 +305,20 @@ def test_category_contains_with_none():
     assert tag not in other_category
 
 
-def test_infinite_spans(complex_account):
+def test_infinite_spans(complex_timespan):
     span1 = Span(None, None)
-    span2 = Span(None, complex_account.span.finish_at)
+    span2 = Span(None, complex_timespan.span.finish_at)
     assert span2 in span1
     assert span1 in span2
     assert span1.duration == span2.duration
 
 
-def test_sqlite_backend(complex_account, sqlite_account):
-    assert len(sqlite_account) == len(complex_account)
+def test_sqlite_backend(complex_timespan, sqlite_timespan):
+    assert len(sqlite_timespan) == len(complex_timespan)
     assert (
-        sqlite_account.category_pool.categories
-        == complex_account.category_pool.categories
+        sqlite_timespan.category_pool.categories
+        == complex_timespan.category_pool.categories
     )
-    sqlite_tags = set(sqlite_account.iter_tags())
-    base_tags = set(complex_account.iter_tags())
+    sqlite_tags = set(sqlite_timespan.iter_tags())
+    base_tags = set(complex_timespan.iter_tags())
     assert sqlite_tags == base_tags
