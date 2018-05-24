@@ -8,7 +8,7 @@ python:
 
 install:
     - pip install pipenv
-    - pipenv install -d --keep-outdated -v
+    - pipenv install -d --keep-outdated
 
 script:
     - pipenv run tests
