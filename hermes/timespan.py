@@ -30,12 +30,13 @@ class BaseTimeSpan(Spannable):
     ) -> "BaseTimeSpan":
         raise NotImplementedError("Subclasses must define this interface.")
 
+    def has_tag(self, tag: Tag) -> bool:
+        return tag in set(self.iter_tags())
+
     def __len__(self):
         return len(list(self.iter_tags()))
 
-    def __getitem__(  # noqa: F811
-        self, key: Union[Optional[int], slice]
-    ) -> "BaseTimeSpan":
+    def __getitem__(self, key: Union[Optional[int], slice]) -> "BaseTimeSpan":
         # Do a little type casting safety dance. Let's find a better way.
         type_error = key is None
         type_error |= not isinstance(key, slice)
@@ -180,15 +181,15 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     def remove_tag(self, tag: Tag) -> bool:
         with self._sqlite_db as conn:
-            conn.execute(
-                "DELETE FROM tags WHERE valid_from = :valid_from, valid_to = :valid_to, name = :name",
+            result = conn.execute(
+                "DELETE FROM tags WHERE valid_from = :valid_from AND valid_to = :valid_to AND name = :name",
                 {
                     "valid_from": tag.valid_from,
                     "valid_to": tag.valid_to,
                     "name": tag.name,
                 },
             )
-        return True  # TODO
+        return result.rowcount > 0
 
     @property
     def category_pool(self) -> BaseCategoryPool:
@@ -227,6 +228,29 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
                 tags.append(self._tag_from_row(row))
 
         return SqliteTimeSpan(tags=tags)
+
+    def has_tag(self, tag: Tag) -> bool:
+        with self._sqlite_db as conn:
+            query = """
+            SELECT count(*)
+            FROM tags
+            WHERE
+                (valid_to = :valid_to) AND
+                (valid_from = :valid_from) AND
+                (category = :category)
+            """
+            result = conn.execute(
+                query,
+                {
+                    "valid_to": tag.valid_to,
+                    "valid_from": tag.valid_from,
+                    "category": tag.category.fullpath if tag.category else None,
+                },
+            )
+            row = result.fetchone()
+            # We could do consistency checking here - there SHOULD be
+            # only one, ever, but we could check...
+            return row[0] > 0
 
     def _tag_from_row(self, row: sqlite3.Row) -> Tag:
         category = self._category_pool.get_category(row["category"])

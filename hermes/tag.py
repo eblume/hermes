@@ -45,9 +45,9 @@ class Category:
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class Tag(Spannable):
     name: str
-    category: Optional[Category]
-    valid_from: Optional[dt.datetime]
-    valid_to: Optional[dt.datetime]
+    category: Optional[Category] = attr.ib(default=Category("No Category", None))
+    valid_from: Optional[dt.datetime] = attr.ib(default=None)
+    valid_to: Optional[dt.datetime] = attr.ib(default=None)
 
     @property
     def span(self):

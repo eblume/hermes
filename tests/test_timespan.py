@@ -5,7 +5,9 @@ from operator import attrgetter
 from hermes.categorypool import BaseCategoryPool, MutableCategoryPool
 from hermes.span import Span, Spannable
 from hermes.tag import Category, Tag
-from hermes.timespan import BaseTimeSpan, SqliteTimeSpan, TimeSpan
+from hermes.timespan import (
+    BaseTimeSpan, InsertableTimeSpan, RemovableTimeSpan, SqliteTimeSpan, TimeSpan
+)
 
 import pytest
 
@@ -219,6 +221,9 @@ def test_mutable_category_pool():
     pool = MutableCategoryPool()
     with pytest.raises(ValueError):
         pool.get_category("", True)
+    b_cat = pool.get_category("alfalfa/banana")
+    a_cat = pool.get_category("alfalfa")
+    assert b_cat.parent == a_cat
 
 
 def test_base_spannable_iface():
@@ -322,3 +327,24 @@ def test_sqlite_backend(complex_timespan, sqlite_timespan):
     sqlite_tags = set(sqlite_timespan.iter_tags())
     base_tags = set(complex_timespan.iter_tags())
     assert sqlite_tags == base_tags
+
+
+def test_insertable_removable_interface():
+
+    class FakeTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
+        pass
+
+    ts = FakeTimeSpan()
+    with pytest.raises(NotImplementedError):
+        ts.insert_tag(Tag("Tag A"))
+    with pytest.raises(NotImplementedError):
+        ts.remove_tag(Tag("Tag A"))
+
+
+def test_insertable_removable(sqlite_timespan):
+    # sqlite is both insertable and removable so we'll use it
+    a_tag = next(sqlite_timespan.iter_tags())
+    assert sqlite_timespan.has_tag(a_tag)
+    assert sqlite_timespan.remove_tag(a_tag)
+    assert not sqlite_timespan.remove_tag(a_tag)
+    assert not sqlite_timespan.has_tag(a_tag)
