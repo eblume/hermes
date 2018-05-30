@@ -14,7 +14,6 @@ from .tag import Category, Tag
 
 
 class BaseTimeSpan(Spannable):
-
     @property
     def category_pool(self) -> BaseCategoryPool:
         raise NotImplementedError("Subclasses must define this interface.")
@@ -51,8 +50,8 @@ class BaseTimeSpan(Spannable):
         if type_error:
             raise TypeError("BaseTimeSpan objects must be sliced with datetime")
 
-        start = cast(dt.datetime, key.start)
-        stop = cast(dt.datetime, key.stop)
+        start = cast(Optional[dt.datetime], key.start)
+        stop = cast(Optional[dt.datetime], key.stop)
 
         return self.reslice(start, stop)
 
@@ -118,13 +117,11 @@ class TimeSpan(BaseTimeSpan):
 
 
 class InsertableTimeSpan(BaseTimeSpan):
-
     def insert_tag(self, tag: Tag) -> None:
         raise NotImplementedError("Subclasses must define this interface.")
 
 
 class RemovableTimeSpan(BaseTimeSpan):
-
     def remove_tag(self, tag: Tag) -> bool:
         """Remove the specified tag. Return true iff the tag was found."""
         raise NotImplementedError("Subclasses must define this interface.")
@@ -211,16 +208,32 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
         self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
     ) -> "BaseTimeSpan":
         tags = []
+        query_start = """
+        SELECT valid_from, valid_to, name, category
+        FROM tags
+        WHERE
+        """
+        tag_is_infinite = "(valid_to IS NULL AND valid_from IS NULL)"
+
+        query_parts = [tag_is_infinite]
+
+        if begins_at is None and finish_at is None:
+            return SqliteTimeSpan(self.iter_tags())
+
+        elif begins_at is None:
+            query_parts += ["(valid_from IS NULL OR valid_from <= :finish_at)"]
+        elif finish_at is None:
+            query_parts += ["(valid_to IS NULL OR valid_to <= :begins_at)"]
+        else:
+            query_parts += [
+                "(valid_to >= :begins_at AND valid_from IS NULL)",
+                "(valid_to IS NULL AND valid_from <= :finish_at)",
+                "(valid_to >= :begins_at AND valid_from <= :finish_at)",
+            ]
+
+        query = f"{query_start} {' OR '.join(query_parts)}"
+
         with self._sqlite_db as conn:
-            query = """
-            SELECT valid_from, valid_to, name, category
-            FROM tags
-            WHERE
-                (valid_to IS NULL AND valid_from IS NULL) OR
-                (valid_to IS NULL AND valid_from <= :finish_at) OR
-                (valid_to >= :begins_at AND valid_from IS NULL) OR
-                (valid_to >= :begins_at AND valid_from <= :finish_at)
-            """
             result = conn.execute(
                 query, {"begins_at": begins_at, "finish_at": finish_at}
             )
@@ -228,6 +241,15 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
                 tags.append(self._tag_from_row(row))
 
         return SqliteTimeSpan(tags=tags)
+
+    @property
+    def span(self) -> "Span":
+        with self._sqlite_db as conn:
+            cursor = conn.execute("SELECT min(valid_from), max(valid_to) FROM tags")
+            result = cursor.fetchone()
+            begins_at = None if result[0] is None else date_parse(result[0])
+            finish_at = None if result[1] is None else date_parse(result[1])
+            return Span(begins_at, finish_at)
 
     def has_tag(self, tag: Tag) -> bool:
         with self._sqlite_db as conn:

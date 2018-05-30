@@ -6,7 +6,11 @@ from hermes.categorypool import BaseCategoryPool, MutableCategoryPool
 from hermes.span import Span, Spannable
 from hermes.tag import Category, Tag
 from hermes.timespan import (
-    BaseTimeSpan, InsertableTimeSpan, RemovableTimeSpan, SqliteTimeSpan, TimeSpan
+    BaseTimeSpan,
+    InsertableTimeSpan,
+    RemovableTimeSpan,
+    SqliteTimeSpan,
+    TimeSpan,
 )
 
 import pytest
@@ -57,7 +61,22 @@ def complex_timespan(complex_timespan_tags):
 
 @pytest.fixture(scope="function")
 def sqlite_timespan(complex_timespan_tags):
-    return SqliteTimeSpan(tags=complex_timespan_tags)
+    return SqliteTimeSpan(complex_timespan_tags)
+
+
+GENERIC_RO_TIMESPANS = {
+    "base": lambda tags: TimeSpan(tags),
+    "sqlite": lambda tags: SqliteTimeSpan(tags),
+}
+
+
+@pytest.fixture
+def generic_ro_timespan(request, complex_timespan_tags):
+    global GENERIC_RO_TIMESPANS
+    if request.param not in GENERIC_RO_TIMESPANS:
+        raise ValueError("Not in GENERIC_RO_TIMESPANS:", request.param)
+
+    return GENERIC_RO_TIMESPANS[request.param](complex_timespan_tags)
 
 
 def test_can_make_account(simple_account):
@@ -110,20 +129,26 @@ def test_describe_complex_topology(complex_timespan, complex_timespan_tags):
     assert accounts[1].span.finish_at == tags[3].valid_to
 
 
-def test_subspans(complex_timespan):
+@pytest.mark.parametrize(
+    "generic_ro_timespan", GENERIC_RO_TIMESPANS.keys(), indirect=True
+)
+def test_subspans(generic_ro_timespan):
     two_hours = dt.timedelta(hours=2)
 
     # Span subspanning
-    spans = list(complex_timespan.span.subspans(two_hours))
+    spans = list(generic_ro_timespan.span.subspans(two_hours))
     for span in spans:
         assert span.duration <= two_hours
-    assert Span(spans[0].begins_at, spans[1].finish_at) == complex_timespan.span
+    assert Span(spans[0].begins_at, spans[1].finish_at) == generic_ro_timespan.span
     assert spans[0].finish_at == spans[1].begins_at
     assert spans[0].duration == spans[1].duration
 
 
-def test_spans(complex_timespan):
-    span = complex_timespan.span
+@pytest.mark.parametrize(
+    "generic_ro_timespan", GENERIC_RO_TIMESPANS.keys(), indirect=True
+)
+def test_spans(generic_ro_timespan):
+    span = generic_ro_timespan.span
     begins_plus5 = span.begins_at + dt.timedelta(minutes=5)
     begins_minus5 = span.begins_at - dt.timedelta(minutes=5)
     finish_plus5 = span.finish_at + dt.timedelta(minutes=5)
@@ -163,27 +188,40 @@ def test_spans(complex_timespan):
     assert Span(begins_plus5, begins_plus5) not in Span(begins_minus5, begins_minus5)
 
 
-def test_equality(complex_timespan):
-    begins_at = complex_timespan.span.begins_at
-    finish_at = complex_timespan.span.finish_at
+@pytest.mark.parametrize(
+    "generic_ro_timespan", GENERIC_RO_TIMESPANS.keys(), indirect=True
+)
+def test_slice_syntaxes(generic_ro_timespan):
+    assert len(generic_ro_timespan) == 4
 
-    assert complex_timespan == complex_timespan[begins_at:finish_at]
-    assert complex_timespan == complex_timespan[:]
-    assert complex_timespan != TimeSpan({})
+    base_tags = list(generic_ro_timespan[:].iter_tags())
+    resliced_tags = list(generic_ro_timespan.reslice(None, None).iter_tags())
+    assert base_tags == resliced_tags
+
+    assert len(generic_ro_timespan[:]) == 4
+    assert len({t for t in generic_ro_timespan.iter_tags()}) == 4
+    base_tags = list(generic_ro_timespan.iter_tags())
+    spanned_tags = [
+        t for t in generic_ro_timespan.iter_tags() if t in generic_ro_timespan.span
+    ]
+    assert base_tags == spanned_tags
+
+    past_half = generic_ro_timespan.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
+    assert len(generic_ro_timespan[past_half:]) == 2
+    assert len(generic_ro_timespan[:past_half]) == 3
+    assert len(generic_ro_timespan[past_half:past_half]) == 1
+
+    base_tags = list(generic_ro_timespan[past_half:].iter_tags())
+    resliced_tags = list(generic_ro_timespan.reslice(past_half, None).iter_tags())
+    assert base_tags == resliced_tags
 
 
-def test_slice_syntaxes(complex_timespan):
-    assert complex_timespan[:] == complex_timespan.reslice(None, None)
-    assert len(complex_timespan[:]) == 4
-    assert len({t for t in complex_timespan.tags}) == 4
-    assert (
-        {t for t in complex_timespan.tags if t in complex_timespan.span}
-        == complex_timespan.tags
-    )
-
-    past_half = complex_timespan.span.begins_at + dt.timedelta(minutes=60 * 2 + 10)
-    assert len(complex_timespan[past_half:]) == 2
-    assert complex_timespan[past_half:] == complex_timespan.reslice(past_half, None)
+@pytest.mark.parametrize(
+    "generic_ro_timespan", GENERIC_RO_TIMESPANS.keys(), indirect=True
+)
+def test_tag_having(generic_ro_timespan):
+    a_tag = next(generic_ro_timespan.iter_tags())
+    assert generic_ro_timespan.has_tag(a_tag)
 
 
 def test_category():
@@ -324,13 +362,16 @@ def test_sqlite_backend(complex_timespan, sqlite_timespan):
         sqlite_timespan.category_pool.categories
         == complex_timespan.category_pool.categories
     )
-    sqlite_tags = set(sqlite_timespan.iter_tags())
-    base_tags = set(complex_timespan.iter_tags())
+    sqlite_tags = list(sqlite_timespan.iter_tags())
+    base_tags = list(complex_timespan.iter_tags())
+    assert sqlite_tags == base_tags
+
+    sqlite_tags = sorted(sqlite_timespan.filter("A/B").iter_tags())
+    base_tags = sorted(complex_timespan.filter("A/B").iter_tags())
     assert sqlite_tags == base_tags
 
 
 def test_insertable_removable_interface():
-
     class FakeTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
         pass
 
