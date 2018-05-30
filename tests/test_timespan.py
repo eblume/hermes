@@ -407,3 +407,17 @@ def test_sqlite_writable(sqlite_timespan):
             if hack_filepath.exists():
                 os.unlink(str(hack_filepath))
     assert sorted(sqlite_timespan.iter_tags()) == sorted(new_span.iter_tags())
+
+    with tempfile.NamedTemporaryFile() as tempf:
+        with pytest.raises(ValueError):
+            sqlite_timespan.write_to(Path(tempf.name))
+
+
+def test_writable_iface():
+    class Foo(WriteableTimeSpan):
+        pass
+
+    with pytest.raises(NotImplementedError):
+        Foo().write_to("/tmp/this_should_never_exist_hermes")
+    with pytest.raises(NotImplementedError):
+        Foo.read_from("/tmp/this_should_never_exist_hermes")
