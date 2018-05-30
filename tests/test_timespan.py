@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
+import os
+import tempfile
 from operator import attrgetter
+from pathlib import Path
 
 from hermes.categorypool import BaseCategoryPool, MutableCategoryPool
 from hermes.span import Span, Spannable
@@ -11,6 +14,7 @@ from hermes.timespan import (
     RemovableTimeSpan,
     SqliteTimeSpan,
     TimeSpan,
+    WriteableTimeSpan,
 )
 
 import pytest
@@ -387,5 +391,19 @@ def test_insertable_removable(sqlite_timespan):
     a_tag = next(sqlite_timespan.iter_tags())
     assert sqlite_timespan.has_tag(a_tag)
     assert sqlite_timespan.remove_tag(a_tag)
-    assert not sqlite_timespan.remove_tag(a_tag)
     assert not sqlite_timespan.has_tag(a_tag)
+
+
+def test_sqlite_writable(sqlite_timespan):
+    assert isinstance(sqlite_timespan, WriteableTimeSpan)
+    with tempfile.NamedTemporaryFile() as tempf:
+        # TODO - hack involving suffixing a tempfile name, which loses the
+        # awesome security of tempfile's context manager :(
+        try:
+            hack_filepath = Path(tempf.name + "-test")
+            sqlite_timespan.write_to(hack_filepath)
+            new_span = SqliteTimeSpan.read_from(hack_filepath)
+        finally:
+            if hack_filepath.exists():
+                os.unlink(str(hack_filepath))
+    assert sorted(sqlite_timespan.iter_tags()) == sorted(new_span.iter_tags())

@@ -10,6 +10,7 @@ google-api-python-client = "*"
 "oauth2client" = "*"
 python-dateutil = "*"
 appdirs = "*"
+apsw = "*"
 
 [dev-packages]
 pip = "==9.0.3"

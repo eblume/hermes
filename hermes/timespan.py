@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
-import sqlite3
 from operator import attrgetter
-from typing import Iterable, Optional, Set, Union, cast
+from pathlib import Path
+from typing import Any, Iterable, Optional, Set, Union, cast
+
+import apsw
 
 import attr
 
@@ -127,7 +129,16 @@ class RemovableTimeSpan(BaseTimeSpan):
         raise NotImplementedError("Subclasses must define this interface.")
 
 
-class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
+class WriteableTimeSpan(BaseTimeSpan):
+    def write_to(self, filename: Path) -> None:
+        raise NotImplementedError("Subclasses must define this interface.")
+
+    @classmethod
+    def read_from(cls, filename: Path) -> BaseTimeSpan:
+        raise NotImplementedError("Subclasses must define this interface.")
+
+
+class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
     """Sqlite-backed TimeSpan"""
 
     # The goal for this implementation is that it should be a really solid
@@ -136,12 +147,11 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
     # optimizations at the expense of readibility.
 
     def __init__(self, tags: Optional[Iterable[Tag]] = None) -> None:
-        self._sqlite_db: sqlite3.Connection = sqlite3.connect(":memory:")
+        self._sqlite_db: apsw.Connection = apsw.Connection(":memory:")
         self._category_pool: MutableCategoryPool = MutableCategoryPool()
 
-        self._sqlite_db.row_factory = sqlite3.Row
-
-        with self._sqlite_db as conn:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
             conn.execute(
                 """
                 CREATE TABLE tags (
@@ -154,8 +164,8 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             )
             conn.execute(
                 """
-            CREATE UNIQUE INDEX tags_idx ON tags (valid_from, valid_to, name)
-            """
+                CREATE UNIQUE INDEX tags_idx ON tags (valid_from, valid_to, name)
+                """
             )
 
             if tags:
@@ -163,40 +173,51 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
                     self.insert_tag(tag)
 
     def insert_tag(self, tag: Tag) -> None:
-        with self._sqlite_db as conn:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
             category_str = tag.category.fullpath if tag.category else "sqlite3"
             category = self._category_pool.get_category(category_str, create=True)
             conn.execute(
                 "INSERT INTO tags VALUES (:valid_from, :valid_to, :name, :category)",
                 {
-                    "valid_from": tag.valid_from,
-                    "valid_to": tag.valid_to,
+                    "valid_from": tag.valid_from.isoformat()
+                    if tag.valid_from
+                    else None,
+                    "valid_to": tag.valid_to.isoformat() if tag.valid_to else None,
                     "name": tag.name,
                     "category": category.fullpath,
                 },
             )
 
     def remove_tag(self, tag: Tag) -> bool:
-        with self._sqlite_db as conn:
-            result = conn.execute(
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            conn.execute(
                 "DELETE FROM tags WHERE valid_from = :valid_from AND valid_to = :valid_to AND name = :name",
                 {
-                    "valid_from": tag.valid_from,
-                    "valid_to": tag.valid_to,
+                    "valid_from": tag.valid_from.isoformat()
+                    if tag.valid_from is not None
+                    else None,
+                    "valid_to": tag.valid_to.isoformat()
+                    if tag.valid_to is not None
+                    else None,
                     "name": tag.name,
                 },
             )
-        return result.rowcount > 0
+        return True  # TODO - apsw does not support rowcount, do we care?
 
     @property
     def category_pool(self) -> BaseCategoryPool:
         return cast(BaseCategoryPool, self._category_pool)
 
     def iter_tags(self) -> Iterable["Tag"]:
-        cursor = self._sqlite_db.cursor()
-        result = cursor.execute("SELECT valid_from, valid_to, name, category FROM tags")
-        for row in result:
-            yield self._tag_from_row(row)
+        with self._sqlite_db:
+            cursor = self._sqlite_db.cursor()
+            result = cursor.execute(
+                "SELECT valid_from, valid_to, name, category FROM tags"
+            )
+            for row in result:
+                yield self._tag_from_row(row)
 
     def filter(self, category: Union["Category", str]) -> "BaseTimeSpan":
         if isinstance(category, str):
@@ -233,9 +254,18 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
         query = f"{query_start} {' OR '.join(query_parts)}"
 
-        with self._sqlite_db as conn:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
             result = conn.execute(
-                query, {"begins_at": begins_at, "finish_at": finish_at}
+                query,
+                {
+                    "begins_at": begins_at.isoformat()
+                    if begins_at is not None
+                    else None,
+                    "finish_at": finish_at.isoformat()
+                    if finish_at is not None
+                    else None,
+                },
             )
             for row in result:
                 tags.append(self._tag_from_row(row))
@@ -244,15 +274,17 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     @property
     def span(self) -> "Span":
-        with self._sqlite_db as conn:
-            cursor = conn.execute("SELECT min(valid_from), max(valid_to) FROM tags")
-            result = cursor.fetchone()
-            begins_at = None if result[0] is None else date_parse(result[0])
-            finish_at = None if result[1] is None else date_parse(result[1])
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            result = conn.execute("SELECT min(valid_from), max(valid_to) FROM tags")
+            earliest, latest = result.fetchone()
+            begins_at = None if earliest is None else date_parse(earliest)
+            finish_at = None if latest is None else date_parse(latest)
             return Span(begins_at, finish_at)
 
     def has_tag(self, tag: Tag) -> bool:
-        with self._sqlite_db as conn:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
             query = """
             SELECT count(*)
             FROM tags
@@ -264,8 +296,12 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             result = conn.execute(
                 query,
                 {
-                    "valid_to": tag.valid_to,
-                    "valid_from": tag.valid_from,
+                    "valid_to": tag.valid_to.isoformat()
+                    if tag.valid_to is not None
+                    else None,
+                    "valid_from": tag.valid_from.isoformat()
+                    if tag.valid_from is not None
+                    else None,
                     "category": tag.category.fullpath if tag.category else None,
                 },
             )
@@ -274,11 +310,28 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             # only one, ever, but we could check...
             return row[0] > 0
 
-    def _tag_from_row(self, row: sqlite3.Row) -> Tag:
-        category = self._category_pool.get_category(row["category"])
+    # TODO - do better than 'any' here please
+    def _tag_from_row(self, row: Any) -> Tag:
+        category = self._category_pool.get_category(row[3])
         return Tag(
-            valid_from=date_parse(row["valid_from"]),
-            valid_to=date_parse(row["valid_to"]),
-            name=row["name"],
+            valid_from=date_parse(row[0]),
+            valid_to=date_parse(row[1]),
+            name=row[2],
             category=category,
         )
+
+    def write_to(self, filename: Path) -> None:
+        if filename.exists():
+            raise ValueError("File already exists", filename)
+
+        file_db = apsw.Connection(str(filename))
+        with file_db.backup("main", self._sqlite_db, "main") as backup:
+            backup.step()  # This can be split in to chunks if need be
+
+    @classmethod
+    def read_from(cls, filename: Path) -> "SqliteTimeSpan":
+        file_db = apsw.Connection(str(filename))
+        new_timespan = SqliteTimeSpan()
+        with new_timespan._sqlite_db.backup("main", file_db, "main") as backup:
+            backup.step()  # This can be split in to chunks if need be
+        return new_timespan

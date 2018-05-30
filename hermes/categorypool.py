@@ -7,7 +7,6 @@ from .tag import Category
 
 
 class BaseCategoryPool:
-
     @property
     def categories(self) -> Mapping[str, Category]:
         raise NotImplementedError("Subclasses must define this interface")
@@ -41,11 +40,10 @@ class BaseCategoryPool:
             parent_cat = None
             if len(category_names) > 1:
                 parent_cat = self._get_category_inner(category_names[:-1])
-            return Category(category_names[0], parent_cat)
+            return Category(category_names[-1], parent_cat)
 
 
 class MutableCategoryPool(BaseCategoryPool):
-
     def __init__(self) -> None:
         self._categories: Dict[str, Category] = {}
 
@@ -83,6 +81,7 @@ class MutableCategoryPool(BaseCategoryPool):
 class CategoryPool(BaseCategoryPool):
     """Pool of cached categories, searchable by name
     """
+
     stored_categories: Mapping[str, Category]
 
     @property
