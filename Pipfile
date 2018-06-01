@@ -35,4 +35,5 @@ pytest-annotate = "*"
 python_version = "3.6"
 
 [scripts]
-tests = "python -m pytest --cov=hermes --cov-report term-missing"
+tests = "python -m pytest --cov=hermes --cov-report term-missing --ignore tests/integration"
+integration = "python -m pytest --cov=hermes --cov-report term-missing"
