@@ -314,8 +314,8 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
     def _tag_from_row(self, row: Any) -> Tag:
         category = self._category_pool.get_category(row[3])
         return Tag(
-            valid_from=date_parse(row[0]),
-            valid_to=date_parse(row[1]),
+            valid_from=None if row[0] is None else date_parse(row[0]),
+            valid_to=None if row[1] is None else date_parse(row[1]),
             name=row[2],
             category=category,
         )

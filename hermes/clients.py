@@ -2,16 +2,16 @@
 import datetime as dt
 import re
 from pathlib import Path
-from typing import Iterable, Optional, Union, cast
+from typing import Iterable, Optional, Union
 
-from appdirs import user_data_dir  # type: ignore
+from appdirs import user_data_dir
 
 from dateutil.parser import parse as date_parse
 
-from googleapiclient import discovery  # type: ignore
-from googleapiclient.http import build_http  # type: ignore
+from googleapiclient import discovery
+from googleapiclient.http import build_http
 
-from oauth2client import client as oauth2_client, file, tools  # type: ignore
+from oauth2client import client as oauth2_client, file, tools
 
 from .categorypool import BaseCategoryPool
 from .tag import Category, Tag
@@ -28,31 +28,55 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
     you're more comfortable with.
     """
 
-    def __init__(self):
-        self._cached_timespan: BaseTimeSpan = type(self).load_gcal()
+    def __init__(
+        self,
+        begins_at: Optional[dt.datetime] = None,
+        finish_at: Optional[dt.datetime] = None,
+    ) -> None:
+        self._cached_timespan: Optional[BaseTimeSpan] = None
+        self.begins_at = begins_at
+        self.finish_at = finish_at
+
+    def _warm_cache(self) -> SqliteTimeSpan:
+        cache = self.load_gcal()
+        self._cached_timespan = cache
+        return cache
+
+    @property
+    def span(self):
+        cache = self._warm_cache()
+        return cache.span
 
     @property
     def category_pool(self) -> BaseCategoryPool:
-        return cast(BaseCategoryPool, self._cached_timespan.category_pool)
+        cache = self._warm_cache()
+        return cache.category_pool
 
     def iter_tags(self) -> Iterable["Tag"]:
-        yield from self._cached_timespan.iter_tags()
+        cache = self._warm_cache()
+        yield from cache.iter_tags()
 
     def filter(self, category: Union["Category", str]) -> "BaseTimeSpan":
-        return self._cached_timespan.filter(category)
+        cache = self._warm_cache()
+        return cache.filter(category)
 
     def reslice(
         self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
-    ) -> "BaseTimeSpan":
-        return self._cached_timespan.reslice(begins_at, finish_at)
+    ) -> "GoogleCalendarTimeSpan":
+        self.begins_at = begins_at
+        self.finish_at = finish_at
+        self._cached_timespan = self.load_gcal()
+        return self
 
-    @classmethod
     def load_gcal(
-        cls,
+        self,
         oauth_config: Optional[Path] = None,
         base_category: Category = Category("GCal", None),
-    ) -> BaseTimeSpan:
+    ) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
+
+        THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
+        on your system, in order to sign you in!
 
         `oauth_config` should be a file that contains google OAuth
         credentials. Currently, ALL calendar events from ALL calendars are
@@ -66,6 +90,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         '/home/erich/.config/hermescli'
         '/Users/erich/Library/Application Support/HermesCLI'
         """
+        # TODO - figure out a nicer way to handle OAuth cycle
         appname = "HermesCLI"
         appauthor = "Hermes"
         service_name = "calendar"
@@ -90,10 +115,11 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         # TODO - support offline discovery file
         # (see discovery.build_from_document)
         service = discovery.build(service_name, version, http=http)
-        return SqliteTimeSpan(set(cls._tag_events_from_service(base_category, service)))
+        return SqliteTimeSpan(
+            set(self._tag_events_from_service(base_category, service))
+        )
 
-    @classmethod
-    def _tag_events_from_service(cls, root_category, service) -> Iterable["Tag"]:
+    def _tag_events_from_service(self, root_category, service) -> Iterable["Tag"]:
         page_token = None
         while True:
             calendar_list = service.calendarList().list(pageToken=page_token).execute()
@@ -111,15 +137,24 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
                 # * missing from calendar_resource: summaryOverride, backgroundColor, defaultReminders, accessRole, foregroundColor, colorId
                 # * (none missing in reverse)
                 # Conclusion: for at least some calendars, we get nothing useful
-                for event in cls._retrieve_events_from_calendar(calendar, service):
+                for event in self._retrieve_events_from_calendar(calendar, service):
                     start = event.get("start")
                     end = event.get("end")
-                    valid_from = date_parse(
-                        start.get("dateTime", start.get("date", None))
-                    ) if start else None
-                    valid_to = date_parse(
-                        end.get("dateTime", end.get("date", None))
-                    ) if end else None
+                    valid_from = (
+                        date_parse(
+                            start.get("dateTime", start.get("date", None)),
+                            ignoretz=True,
+                        )
+                        if start
+                        else None
+                    )
+                    valid_to = (
+                        date_parse(
+                            end.get("dateTime", end.get("date", None)), ignoretz=True
+                        )
+                        if end
+                        else None
+                    )
                     yield Tag(
                         name=event.get("summary", event.get("id")),
                         category=category,
@@ -131,14 +166,19 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             if not page_token:
                 break
 
-    @classmethod
-    def _retrieve_events_from_calendar(cls, calendar, service):
+    def _retrieve_events_from_calendar(self, calendar, service):
         # https://developers.google.com/calendar/v3/reference/events/list
         page_token = None
         while True:
-            query_params = {"calendarId": calendar["id"], "timeZone": "Etc/UTC"}
+            query_params = {
+                "calendarId": calendar["id"],
+                "timeZone": "Etc/UTC",  # TODO - figure out how to get this to play nice with dateutil
+            }
             # There are tons of other query params to look in to. Also, live syncing!
-            # (notable, 'timeMin' and 'timeMax' - also 'updatedMin', etc.)
+            if self.begins_at:
+                query_params["timeMin"] = self.begins_at.isoformat()
+            if self.finish_at:
+                query_params["timeMax"] = self.finish_at.isoformat()
             if page_token:
                 query_params["pageToken"] = page_token
 
