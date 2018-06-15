@@ -421,3 +421,14 @@ def test_writable_iface():
         Foo().write_to("/tmp/this_should_never_exist_hermes")
     with pytest.raises(NotImplementedError):
         Foo.read_from("/tmp/this_should_never_exist_hermes")
+
+
+def test_categorypool_contains_string(complex_timespan):
+    assert "not a tag" not in complex_timespan.category_pool
+    assert "A/B" in complex_timespan.category_pool
+    assert "B" in complex_timespan.category_pool
+    assert "A/A" not in complex_timespan.category_pool
+
+
+def test_categorypool_length(complex_timespan):
+    assert len(complex_timespan.category_pool) == 3
