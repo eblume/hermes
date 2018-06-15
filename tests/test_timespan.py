@@ -253,7 +253,7 @@ def test_base_category_pool_iface():
         pool.categories
 
     with pytest.raises(TypeError):
-        "foo" in pool
+        None in pool
 
     with pytest.raises(ValueError):
         pool.get_category("")

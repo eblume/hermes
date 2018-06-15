@@ -28,14 +28,23 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
     you're more comfortable with.
     """
 
+    DEFAULT_BASE_CATEGORY = Category("GCal", None)
+
     def __init__(
         self,
         begins_at: Optional[dt.datetime] = None,
         finish_at: Optional[dt.datetime] = None,
+        oauth_config: Optional[Path] = None,
+        base_category: Category = None,
     ) -> None:
         self._cached_timespan: Optional[BaseTimeSpan] = None
-        self.begins_at = begins_at
-        self.finish_at = finish_at
+
+        self.begins_at: Optional[dt.datetime] = begins_at
+        self.finish_at: Optional[dt.datetime] = finish_at
+        self.oauth_config_path: Optional[Path] = oauth_config
+        self.base_category: Optional[
+            Category
+        ] = base_category or self.DEFAULT_BASE_CATEGORY
 
     def _warm_cache(self) -> SqliteTimeSpan:
         cache = self.load_gcal()
@@ -70,8 +79,10 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
 
     def load_gcal(
         self,
+        begins_at: Optional[dt.datetime] = None,
+        finish_at: Optional[dt.datetime] = None,
         oauth_config: Optional[Path] = None,
-        base_category: Category = Category("GCal", None),
+        base_category: Category = None,
     ) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
@@ -90,6 +101,15 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         '/home/erich/.config/hermescli'
         '/Users/erich/Library/Application Support/HermesCLI'
         """
+        # TODO - I'm pretty sure that the default location list above is
+        # actually not quite right... need to investigate
+        begins_at = begins_at or self.begins_at
+        finish_at = finish_at or self.finish_at
+        base_category = (
+            base_category or self.base_category or self.DEFAULT_BASE_CATEGORY
+        )
+        oauth_config = oauth_config or self.oauth_config_path
+
         # TODO - figure out a nicer way to handle OAuth cycle
         appname = "HermesCLI"
         appauthor = "Hermes"
@@ -109,17 +129,30 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         storage = file.Storage(service_name + ".dat")
         credentials = storage.get()
         if credentials is None or credentials.invalid:
+            # TODO - handle this better possibly? right now, tough to control
             credentials = tools.run_flow(flow, storage)
         http = credentials.authorize(http=build_http())
 
         # TODO - support offline discovery file
         # (see discovery.build_from_document)
-        service = discovery.build(service_name, version, http=http)
+        service = discovery.build(
+            service_name, version, http=http, cache_discovery=False
+        )
         return SqliteTimeSpan(
-            set(self._tag_events_from_service(base_category, service))
+            set(
+                self._tag_events_from_service(
+                    begins_at, finish_at, base_category, service
+                )
+            )
         )
 
-    def _tag_events_from_service(self, root_category, service) -> Iterable["Tag"]:
+    def _tag_events_from_service(
+        self,
+        begins_at: Optional[dt.datetime],
+        finish_at: Optional[dt.datetime],
+        root_category: Category,
+        service,
+    ) -> Iterable["Tag"]:
         page_token = None
         while True:
             calendar_list = service.calendarList().list(pageToken=page_token).execute()
@@ -137,7 +170,9 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
                 # * missing from calendar_resource: summaryOverride, backgroundColor, defaultReminders, accessRole, foregroundColor, colorId
                 # * (none missing in reverse)
                 # Conclusion: for at least some calendars, we get nothing useful
-                for event in self._retrieve_events_from_calendar(calendar, service):
+                for event in self._retrieve_events_from_calendar(
+                    calendar, service, begins_at, finish_at
+                ):
                     start = event.get("start")
                     end = event.get("end")
                     valid_from = (
@@ -166,7 +201,13 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             if not page_token:
                 break
 
-    def _retrieve_events_from_calendar(self, calendar, service):
+    def _retrieve_events_from_calendar(
+        self,
+        calendar,
+        service,
+        begins_at: Optional[dt.datetime] = None,
+        finish_at: Optional[dt.datetime] = None,
+    ):
         # https://developers.google.com/calendar/v3/reference/events/list
         page_token = None
         while True:
@@ -175,10 +216,10 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
                 "timeZone": "Etc/UTC",  # TODO - figure out how to get this to play nice with dateutil
             }
             # There are tons of other query params to look in to. Also, live syncing!
-            if self.begins_at:
-                query_params["timeMin"] = self.begins_at.isoformat()
-            if self.finish_at:
-                query_params["timeMax"] = self.finish_at.isoformat()
+            if begins_at:
+                query_params["timeMin"] = begins_at.isoformat()
+            if finish_at:
+                query_params["timeMax"] = finish_at.isoformat()
             if page_token:
                 query_params["pageToken"] = page_token
 
