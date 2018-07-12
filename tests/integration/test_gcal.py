@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dateutil.parser import parse as date_parse
 
-from hermes.clients import GoogleCalendarTimeSpan
+from hermes.clients.gcal import GoogleCalendarTimeSpan
 
 import pytest
 
@@ -18,7 +18,8 @@ def gcal_may_2018():
 
 
 def test_has_events(gcal_may_2018):
-    assert len(gcal_may_2018) == 221
+    assert len(gcal_may_2018) == 219  # value is changing :( this needs to be
+    # made less brittle with a special calendar just for testing, or something.
     tags = list(gcal_may_2018.iter_tags())
     tags_with_concrete_time = [
         t for t in tags if t.valid_from is not None and t.valid_to is not None
@@ -31,10 +32,11 @@ def test_has_events(gcal_may_2018):
 
 def test_alternate_creation_args():
     begin = date_parse("01 June 2016 00:00:00 PDT")
-    finish = date_parse("01 June 2016 00:00:00 PDT")
+    finish = date_parse("01 June 2016 23:59:59 PDT")
     tags_a = set(GoogleCalendarTimeSpan(begins_at=begin, finish_at=finish).iter_tags())
     tags_b = set(GoogleCalendarTimeSpan()[begin:finish].iter_tags())
     assert tags_a == tags_b
+    assert len(tags_a) == 4
 
 
 def test_category_pool(gcal_may_2018):
@@ -44,7 +46,7 @@ def test_category_pool(gcal_may_2018):
 
 def test_filter(gcal_may_2018):
     assert len(gcal_may_2018.filter("not a tag")) == 0
-    assert len(gcal_may_2018.filter("GCal")) == 93
+    assert len(gcal_may_2018.filter("GCal")) == 219
 
 
 def test_bad_creds():

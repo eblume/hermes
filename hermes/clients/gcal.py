@@ -13,9 +13,9 @@ from googleapiclient.http import build_http
 
 from oauth2client import client as oauth2_client, file, tools
 
-from .categorypool import BaseCategoryPool
-from .tag import Category, Tag
-from .timespan import BaseTimeSpan, SqliteTimeSpan
+from ..categorypool import BaseCategoryPool
+from ..tag import Category, Tag
+from ..timespan import BaseTimeSpan, SqliteTimeSpan
 
 
 class GoogleCalendarTimeSpan(BaseTimeSpan):
