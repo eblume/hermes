@@ -5,17 +5,10 @@ import tempfile
 from operator import attrgetter
 from pathlib import Path
 
-from hermes.categorypool import BaseCategoryPool, MutableCategoryPool
-from hermes.span import Span, Spannable
+from hermes.categorypool import MutableCategoryPool
+from hermes.span import Span
 from hermes.tag import Category, Tag
-from hermes.timespan import (
-    BaseTimeSpan,
-    InsertableTimeSpan,
-    RemovableTimeSpan,
-    SqliteTimeSpan,
-    TimeSpan,
-    WriteableTimeSpan,
-)
+from hermes.timespan import SqliteTimeSpan, TimeSpan, WriteableTimeSpan
 
 import pytest
 
@@ -186,18 +179,6 @@ def test_category_pool(complex_timespan):
     assert splat == [("A", "A"), ("A/B", "B"), ("A/B/C", "C")]
 
 
-def test_base_category_pool_iface():
-    pool = BaseCategoryPool()
-    with pytest.raises(NotImplementedError):
-        pool.categories
-
-    with pytest.raises(TypeError):
-        None in pool
-
-    with pytest.raises(ValueError):
-        pool.get_category("")
-
-
 def test_mutable_category_pool():
     pool = MutableCategoryPool()
     with pytest.raises(ValueError):
@@ -205,12 +186,6 @@ def test_mutable_category_pool():
     b_cat = pool.get_category("alfalfa/banana")
     a_cat = pool.get_category("alfalfa")
     assert b_cat.parent == a_cat
-
-
-def test_base_spannable_iface():
-    span = Spannable()
-    with pytest.raises(NotImplementedError):
-        span.span
 
 
 def test_span_ordering():
@@ -237,21 +212,6 @@ def test_span_ordering():
 
     assert span_left < overlap_right_of_left
     assert span_right > overlap_left_of_right
-
-
-def test_basetimeaccount_iface():
-    account = BaseTimeSpan()
-    with pytest.raises(NotImplementedError):
-        account.category_pool
-
-    with pytest.raises(NotImplementedError):
-        account.iter_tags()
-
-    with pytest.raises(NotImplementedError):
-        account.filter(str())
-
-    with pytest.raises(NotImplementedError):
-        account.reslice(None, None)
 
 
 def test_slicing_nonsense(complex_timespan):
@@ -314,17 +274,6 @@ def test_sqlite_backend(complex_timespan, sqlite_timespan):
     assert sqlite_tags == base_tags
 
 
-def test_insertable_removable_interface():
-    class FakeTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
-        pass
-
-    ts = FakeTimeSpan()
-    with pytest.raises(NotImplementedError):
-        ts.insert_tag(Tag("Tag A"))
-    with pytest.raises(NotImplementedError):
-        ts.remove_tag(Tag("Tag A"))
-
-
 def test_insertable_removable(sqlite_timespan):
     # sqlite is both insertable and removable so we'll use it
     a_tag = next(sqlite_timespan.iter_tags())
@@ -350,16 +299,6 @@ def test_sqlite_writable(sqlite_timespan):
     with tempfile.NamedTemporaryFile() as tempf:
         with pytest.raises(ValueError):
             sqlite_timespan.write_to(Path(tempf.name))
-
-
-def test_writable_iface():
-    class Foo(WriteableTimeSpan):
-        pass
-
-    with pytest.raises(NotImplementedError):
-        Foo().write_to("/tmp/this_should_never_exist_hermes")
-    with pytest.raises(NotImplementedError):
-        Foo.read_from("/tmp/this_should_never_exist_hermes")
 
 
 def test_categorypool_contains_string(complex_timespan):

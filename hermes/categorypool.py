@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import abc
 from typing import Dict, List, Mapping, Optional, Union, cast
 
 import attr
@@ -6,7 +7,8 @@ import attr
 from .tag import Category
 
 
-class BaseCategoryPool:
+class BaseCategoryPool(metaclass=abc.ABCMeta):
+    @abc.abstractproperty
     @property
     def categories(self) -> Mapping[str, Category]:
         raise NotImplementedError("Subclasses must define this interface")
@@ -14,8 +16,8 @@ class BaseCategoryPool:
     def __contains__(self, other: Union[str, Category]) -> bool:
         """When possible, use a Category, it is much faster."""
         if isinstance(other, str):
-            for key in self.categories.keys():
-                if other in key:
+            for category_name in self.categories.keys():
+                if other in category_name:  # string 'in'
                     return True
             return False
         elif isinstance(other, Category):
