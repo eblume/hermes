@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import abc
 import datetime as dt
 from operator import attrgetter
 from pathlib import Path
@@ -15,17 +16,21 @@ from .span import Span, Spannable
 from .tag import Category, Tag
 
 
-class BaseTimeSpan(Spannable):
+class BaseTimeSpan(Spannable, metaclass=abc.ABCMeta):
+    @abc.abstractproperty
     @property
     def category_pool(self) -> BaseCategoryPool:
         raise NotImplementedError("Subclasses must define this interface.")
 
+    @abc.abstractmethod
     def iter_tags(self) -> Iterable["Tag"]:
         raise NotImplementedError("Subclasses must define this interface.")
 
+    @abc.abstractmethod
     def filter(self, category: Union["Category", str]) -> "BaseTimeSpan":
         raise NotImplementedError("Subclasses must define this interface.")
 
+    @abc.abstractmethod
     def reslice(
         self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
     ) -> "BaseTimeSpan":
