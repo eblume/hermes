@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import abc
 import datetime as dt
 import functools
 from typing import Iterable, Optional
@@ -6,8 +7,8 @@ from typing import Iterable, Optional
 import attr
 
 
-class Spannable:
-
+class Spannable(metaclass=abc.ABCMeta):
+    @abc.abstractproperty
     @property
     def span(self) -> "Span":
         raise NotImplementedError("Subclasses must define this interface")
@@ -40,6 +41,7 @@ class Span(Spannable):
     `dt.timedelta.max`, as needed. They may be set to the _same_ time to
     represent a single instant in time (this is also not handled specially).
     """
+
     begins_at: Optional[dt.datetime]
     finish_at: Optional[dt.datetime]
 
