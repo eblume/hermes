@@ -59,8 +59,9 @@ Get Started!
 
 Ready to contribute? Here's how to set up `hermes` for local development::
 
-$ pipenv update
-$ pipenv run tests
+$ poetry install
+$ poetry shell
+$ bin/hermes_tests.sh
 
 You may also need this to get `pre-commit` installed in your git hooks::
 
@@ -70,15 +71,17 @@ That's it! Once the tests pass, you'll know you've got a fully functioning
 development environment. There are some requirements you will need to install
 first:
 
-* `pipenv`: https://github.com/pypa/pipenv
+* `poetry`: https://github.com/sdispater/poetry
 
-Additionally, you'll almost certainly want:
+Poetry will handle setting up virtual environments and linking and installing
+the proper python versions and files for you. Just remember to always use this
+before developing::
 
-* `pyenv`: https://github.com/pyenv/pyenv
+$ poetry shell
 
-If you've got those two systems installed, `pipenv` should take care of
-everything. Please file an issue if it does not. You SHOULD see a fully
-passing set of tests, with a message like:
+Please file an issue if this setup doesn't work for you. After running
+`bin/hermes_tests.sh`, you SHOULD see a fully passing set of tests, with a
+message like:
 
     ============= 28 passed in 0.18 seconds ===================
 
@@ -89,14 +92,15 @@ Before You Submit
 
 Before you submit any work, please run the full linting setup to ensure that
 code linters (mypy, black, pep8, etc.) pass on the code. SUBMISSIONS THAT DO
-NOT LINT WILL NOT BE ACCEPTED. If you've run `pipenv update` you should get all
-of these 'for free' with no further action required on your part. You may
-notice that `git commit` runs the linters for you, as is expected. You may
-wish to integrate these linters with your editor for live linting, if you use
-`vim`, I recommend syntastic: https://github.com/vim-syntastic/syntastic. Then
-add something like this to your `.vimrc`:
+NOT LINT WILL NOT BE ACCEPTED. If you've run `poetry install` you should get
+all of these 'for free' with no further action required on your part. You may
+notice that `git commit` runs the linters for you, as is expected. If they do
+not, make sure you have run `pre-commit install`. You may wish to integrate
+these linters with your editor for live linting, if you use `vim`, I recommend
+syntastic: https://github.com/vim-syntastic/syntastic. Then add something like
+this to your `.vimrc`:
 
-    let g:syntastic_python_checkers=['flake8', 'python, 'mypy]
+    let g:syntastic_python_checkers=['flake8', 'python, 'mypy']
 
 
 Special Thanks
