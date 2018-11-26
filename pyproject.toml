@@ -6,7 +6,7 @@ authors = ["Erich Blume <blume.erich@gmail.com>"]
 license = "Apache-2.0"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.7 || ^3.6"
 click = "^7.0"
 attrs = "^18.2"
 google-api-python-client = "^1.7"
