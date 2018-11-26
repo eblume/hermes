@@ -21,11 +21,10 @@ from ..timespan import BaseTimeSpan, SqliteTimeSpan
 class GoogleCalendarTimeSpan(BaseTimeSpan):
     """GoogleCalendar loaded in a Hermes interface.
 
-    Use the `load_gcal` class method to load a TimeSpan with tag
-    data directly. By instantiating an object of this class
-    directly, the underlying TimeSpan will be cached for the
-    lifetime of this wrapper. Either way works, pick the flavor
-    you're more comfortable with.
+    Use the `load_gcal` class method to load a TimeSpan with tag data directly.
+    By instantiating an object of this class directly, the underlying TimeSpan
+    will be cached for the lifetime of this wrapper. Either way works, pick the
+    flavor you're more comfortable with.
     """
 
     DEFAULT_BASE_CATEGORY = Category("GCal", None)
@@ -89,20 +88,18 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
         on your system, in order to sign you in!
 
-        `oauth_config` should be a file that contains google OAuth
-        credentials. Currently, ALL calendar events from ALL calendars are
-        downloaded, but filtering options will be available in the future. If
-        left as `None`, the default will be used from `appdirs`, which uses
-        OS-aware configuration directory schemes. See `appdir` for more
-        information. The default config file must be named `'gcal.json'` inside
-        the `user_data_dir()`, which is typically one of:
+        `oauth_config` should be a file that contains google OAuth credentials.
+        Currently, ALL calendar events from ALL calendars are downloaded, but
+        filtering options will be available in the future. If left as `None`,
+        the default will be used from `appdirs`, which uses OS-aware
+        configuration directory schemes. See `appdirs` for more information.
+        The default config file must be named 'gcal.json' inside the
+        `appdirs.user_data_dir()`, which is typically one of:
 
         'C:\\Users\\erich\\AppData\\Local\\Hermes\\HermesCLI'
-        '/home/erich/.config/hermescli'
+        '/home/erich/.local/share/HermesCLI'
         '/Users/erich/Library/Application Support/HermesCLI'
         """
-        # TODO - I'm pretty sure that the default location list above is
-        # actually not quite right... need to investigate
         begins_at = begins_at or self.begins_at
         finish_at = finish_at or self.finish_at
         base_category = (
@@ -120,17 +117,16 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             config_dir: str = user_data_dir(appname, appauthor)
             oauth_config = Path(config_dir) / "gcal.json"
         client_secrets = str(oauth_config)
-        flow = oauth2_client.flow_from_clientsecrets(
-            client_secrets,
-            scope="https://www.googleapis.com/auth/calendar.readonly",
-            message=tools.message_if_missing(client_secrets),
-        )
 
-        storage = file.Storage(service_name + ".dat")
-        credentials = storage.get()
+        token_store = file.Storage(service_name + ".token")
+        credentials = token_store.get()
         if credentials is None or credentials.invalid:
-            # TODO - handle this better possibly? right now, tough to control
-            credentials = tools.run_flow(flow, storage)
+            flow = oauth2_client.flow_from_clientsecrets(
+                client_secrets,
+                scope="https://www.googleapis.com/auth/calendar.readonly",
+                message=tools.message_if_missing(client_secrets),
+            )
+            credentials = tools.run_flow(flow, token_store)
         http = credentials.authorize(http=build_http())
 
         # TODO - support offline discovery file
@@ -160,8 +156,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
                 title = calendar.get(
                     "summaryOverride", calendar.get("summary", f"Imported GCal {i}")
                 )
-                title = re.sub("[^a-zA-Z0-9:\- ]*", "", title)
-                # TODO check for a valid title (sorry future me)
+                title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
                 category = Category(title, root_category)
                 # calendar_resource = service.calendars().get(calendarId=calendar['id']).execute()
                 # ^ unclear if there's anything useful there, I think we get the same data from calendarList

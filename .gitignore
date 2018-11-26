@@ -43,8 +43,8 @@ coverage.xml
 # mypy
 .mypy_cache/
 
-# dat files
-*.dat
+# auth tokens
+*.token
 
 # annotations file
 annotations.json

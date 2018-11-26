@@ -47,14 +47,3 @@ def test_category_pool(gcal_may_2018):
 def test_filter(gcal_may_2018):
     assert len(gcal_may_2018.filter("not a tag")) == 0
     assert len(gcal_may_2018.filter("GCal")) == 219
-
-
-def test_bad_creds():
-    begin = date_parse("01 June 2016 00:00:00 PDT")
-    finish = date_parse("01 June 2016 00:00:00 PDT")
-    tspan = GoogleCalendarTimeSpan(begins_at=begin, finish_at=finish)
-    with tempfile.NamedTemporaryFile() as tempf:
-        tempf.write(b"{'json': 'valid', 'credentials': 'invalid'}\n")
-        tempf.seek(0)
-        with pytest.raises(ValueError, message="Foo"):
-            tspan.load_gcal(oauth_config=Path(tempf.name))
