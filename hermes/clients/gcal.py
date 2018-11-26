@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
 import re
+import warnings
 from pathlib import Path
 from typing import Iterable, Optional, Union
 
@@ -119,7 +120,9 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         client_secrets = str(oauth_config)
 
         token_store = file.Storage(service_name + ".token")
-        credentials = token_store.get()
+        with warnings.catch_warnings():
+            # This warns on 'file not found' which is handled below.
+            credentials = token_store.get()
         if credentials is None or credentials.invalid:
             flow = oauth2_client.flow_from_clientsecrets(
                 client_secrets,
