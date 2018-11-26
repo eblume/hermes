@@ -3,13 +3,12 @@ language: python
 sudo: false
 
 python:
-    - 3.6
+    - 3.7
 
 install:
-    - pip install pipenv
-    - pipenv lock
-    - pipenv install --dev
+    - pip install poetry
+    - poetry install
 
 script:
-    - pipenv run tests
+    - poetry run python -m pytest --ignore tests/integration
     - black --check
