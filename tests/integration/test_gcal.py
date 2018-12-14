@@ -18,7 +18,7 @@ def gcal_may_2018():
 
 
 def test_has_events(gcal_may_2018):
-    assert len(gcal_may_2018) == 219  # value is changing :( this needs to be
+    assert len(gcal_may_2018) == 102  # value is changing :( this needs to be
     # made less brittle with a special calendar just for testing, or something.
     tags = list(gcal_may_2018.iter_tags())
     tags_with_concrete_time = [
@@ -40,10 +40,10 @@ def test_alternate_creation_args():
 
 
 def test_category_pool(gcal_may_2018):
-    assert len(gcal_may_2018.category_pool) == 8
+    assert len(gcal_may_2018.category_pool) == 7
     assert "Contacts" in gcal_may_2018.category_pool
 
 
 def test_filter(gcal_may_2018):
     assert len(gcal_may_2018.filter("not a tag")) == 0
-    assert len(gcal_may_2018.filter("GCal")) == 219
+    assert len(gcal_may_2018.filter("GCal")) == 102
