@@ -212,6 +212,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             query_params = {
                 "calendarId": calendar["id"],
                 "timeZone": "Etc/UTC",  # TODO - figure out how to get this to play nice with dateutil
+                "maxResults": 2500,
             }
             # There are tons of other query params to look in to. Also, live syncing!
             if begins_at:
