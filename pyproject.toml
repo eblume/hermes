@@ -14,6 +14,7 @@ oauth2client = "^4.1"
 python-dateutil = "^2.7"
 appdirs = "^1.4"
 apsw = "^3.9"
+python-constraint = "^1.4"
 
 [tool.poetry.dev-dependencies]
 coverage = "^4.5"
