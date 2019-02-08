@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 from operator import attrgetter
-from typing import List, Optional, Iterator
+from typing import Dict, List, Optional, Iterator
 
 from .tag import Tag
 from .timespan import SqliteTimeSpan
@@ -16,21 +16,16 @@ class Schedule:
 
     def __init__(self) -> None:
         self.tasks: List[Task] = []
+        self.constraints: List["Constraint"] = []
+        self.today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     def task(self, task: "Task") -> None:
         self.tasks.append(task)
 
     def solve(self) -> "PlannedSchedule":
-        return PlannedSchedule(*self.tasks)
-
-
-class PlannedSchedule:
-
-    def __init__(self, *tasks: "Task") -> None:
-        self.plan = SqliteTimeSpan()
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        slots = list(slice_day(today, timedelta(minutes=15)))
-        vars_to_tasks = dict(enumerate(tasks))
+        tags = []
+        slots = list(slice_day(self.today, timedelta(minutes=15)))
+        vars_to_tasks = dict(enumerate(self.tasks))
 
         problem = solver.Problem(solver.MinConflictsSolver())
 
@@ -38,14 +33,32 @@ class PlannedSchedule:
 
         problem.addConstraint(solver.AllDifferentConstraint()) # Don't multi-assign slots
 
+        for constraint in self.constraints:
+            problem.addConstraint(constraint.constrain())
+
         solution = problem.getSolution()
 
         for variable, slot in solution.items():
             task = vars_to_tasks[variable]
             start = datetime.fromtimestamp(slot)
             stop = start + task.duration
-            self.plan.insert_tag(task.tag(start, stop))
+            tags.append(task.tag(start, stop))
 
+        return PlannedSchedule(*tags)
+
+    def start_time(self, time: time) -> None:
+        self.constraints.append(StartTimeConstraint(time, self.today))
+
+    def stop_time(self, time: time) -> None:
+        self.constraints.append(StopTimeConstraint(time, self.today))
+
+
+class PlannedSchedule:
+
+    def __init__(self, *tags: "Tag") -> None:
+        self.plan = SqliteTimeSpan()
+        for tag in tags:
+            self.plan.insert_tag(tag)
 
     def print(self) -> None:
         for i, task in enumerate(sorted(self.plan.iter_tags(), key=attrgetter('valid_from'))):
@@ -70,6 +83,41 @@ class Task:
             valid_from=start,
             valid_to=stop,
         )
+
+
+class Constraint:
+    def constrain(self, vars_to_tasks: Dict[int, "Task"]) -> solver.Constraint:
+        raise NotImplementedError("ABC Must be implemented")
+
+
+class StartTimeConstraint(Constraint):
+    def __init__(self, time: time, today: datetime) -> None:
+        self.time = time
+        self.today = today
+
+    def constrain(self) -> solver.Constraint:
+        start_time = self.today.replace(
+            hour=self.time.hour,
+            minute=self.time.minute,
+            second=self.time.second,
+            microsecond=self.time.microsecond,
+        ).timestamp()
+        return solver.FunctionConstraint(lambda *xs: all(x > start_time for x in xs))
+
+
+class StopTimeConstraint(Constraint):
+    def __init__(self, time: time, today: datetime) -> None:
+        self.time = time
+        self.today = today
+
+    def constrain(self) -> solver.Constraint:
+        stop_time = self.today.replace(
+            hour=self.time.hour,
+            minute=self.time.minute,
+            second=self.time.second,
+            microsecond=self.time.microsecond,
+        ).timestamp()
+        return solver.FunctionConstraint(lambda *xs: all(x < stop_time for x in xs))
 
 
 def slice_day(day: datetime, interval: timedelta) -> Iterator[float]:

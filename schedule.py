@@ -1,3 +1,5 @@
+from datetime import time
+
 from hermes.schedule import Schedule, Task
 
 schedule = Schedule()
@@ -33,6 +35,9 @@ schedule.task(dishes)
 # Set out clothes for tomorrow by 9pm and after dinner
 clothes = Task("Set out clothes")
 schedule.task(clothes)
+
+schedule.start_time(time(hour=8))  # NB: means 7 o'clock... unsure if I like that
+schedule.stop_time(time(hour=23))
 
 plan = schedule.solve()
 
