@@ -1,11 +1,12 @@
-from datetime import datetime, timedelta, date, time
+from datetime import datetime, time, timedelta
+from itertools import combinations
 from operator import attrgetter
-from typing import Dict, List, Optional, Iterator
+from typing import Dict, Iterator, List, Optional
+
+import constraint as solver
 
 from .tag import Tag
 from .timespan import SqliteTimeSpan
-
-import constraint as solver
 
 # Notes:
 # a) The python-constraint solver should eventually be removed to use something
@@ -13,7 +14,6 @@ import constraint as solver
 
 
 class Schedule:
-
     def __init__(self) -> None:
         self.tasks: List[Task] = []
         self.constraints: List["Constraint"] = []
@@ -31,13 +31,31 @@ class Schedule:
 
         problem.addVariables(vars_to_tasks.keys(), slots)
 
-        problem.addConstraint(solver.AllDifferentConstraint()) # Don't multi-assign slots
+        problem.addConstraint(
+            solver.AllDifferentConstraint()
+        )  # Don't multi-assign slots
 
         for constraint in self.constraints:
             problem.addConstraint(constraint.constrain())
 
+        # Also, don't overlap time assignments
+        for var_a, var_b in combinations(vars_to_tasks.keys(), 2):
+            task_a = vars_to_tasks[var_a]
+            task_b = vars_to_tasks[var_b]
+
+            def _dont_overlap(timestamp_a: int, timestamp_b: int) -> bool:
+                time_a = datetime.fromtimestamp(timestamp_a)
+                time_b = datetime.fromtimestamp(timestamp_b)
+                b_overlaps = time_a < time_b < time_a + task_a.duration + task_a.gap
+                a_overlaps = time_b < time_a < time_b + task_b.duration + task_b.gap
+                return not b_overlaps and not a_overlaps
+
+            problem.addConstraint(_dont_overlap, (var_a, var_b))
+
+        # Do the math stuff please (wish it was always this easy)
         solution = problem.getSolution()
 
+        # map solutions to tasks to make tags
         for variable, slot in solution.items():
             task = vars_to_tasks[variable]
             start = datetime.fromtimestamp(slot)
@@ -54,21 +72,25 @@ class Schedule:
 
 
 class PlannedSchedule:
-
     def __init__(self, *tags: "Tag") -> None:
         self.plan = SqliteTimeSpan()
         for tag in tags:
             self.plan.insert_tag(tag)
 
     def print(self) -> None:
-        for i, task in enumerate(sorted(self.plan.iter_tags(), key=attrgetter('valid_from'))):
-            print(f"[{i}] {task.name}: {task.valid_from.time().isoformat()} to {task.valid_to.time().isoformat()}")
+        for i, task in enumerate(
+            sorted(self.plan.iter_tags(), key=attrgetter("valid_from"))
+        ):
+            print(
+                f"[{i+1}] {task.name}: {task.valid_from.time().isoformat()} to {task.valid_to.time().isoformat()}"
+            )
 
 
 class Task:
 
     task_name: str = "Untitled Task"
     duration: timedelta = timedelta(hours=1)
+    gap: timedelta = timedelta(minutes=5)
 
     def __init__(self, name: Optional[str]) -> None:
         if name is not None:
@@ -78,11 +100,7 @@ class Task:
         return self.task_name
 
     def tag(self, start: datetime, stop: datetime) -> Tag:
-        return Tag(
-            name=self.task_name,
-            valid_from=start,
-            valid_to=stop,
-        )
+        return Tag(name=self.task_name, valid_from=start, valid_to=stop)
 
 
 class Constraint:
