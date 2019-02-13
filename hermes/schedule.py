@@ -18,13 +18,14 @@ class Schedule:
         self.tasks: List[Task] = []
         self.constraints: List["Constraint"] = []
         self.today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        self.interval = timedelta(minutes=5)
 
     def task(self, task: "Task") -> None:
         self.tasks.append(task)
 
     def solve(self) -> "PlannedSchedule":
         tags = []
-        slots = list(slice_day(self.today, timedelta(minutes=15)))
+        slots = list(slice_day(self.today, self.interval))
         vars_to_tasks = dict(enumerate(self.tasks))
 
         problem = solver.Problem(solver.MinConflictsSolver())
@@ -92,9 +93,12 @@ class Task:
     duration: timedelta = timedelta(hours=1)
     gap: timedelta = timedelta(minutes=5)
 
-    def __init__(self, name: Optional[str]) -> None:
+    def __init__(self, name: Optional[str] = None, duration: Optional[timedelta] = None) -> None:
         if name is not None:
             self.task_name = name
+
+        if duration is not None:
+            self.duration = duration
 
     def __str__(self) -> str:
         return self.task_name
