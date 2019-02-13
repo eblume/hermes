@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta
 from itertools import combinations
 from operator import attrgetter
-from typing import Dict, Iterator, List, Optional
+from typing import Iterator, List, Optional, Tuple
 
 import constraint as solver
 
@@ -20,29 +20,41 @@ class Schedule:
         self.today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         self.interval = timedelta(minutes=5)
 
-    def task(self, task: "Task") -> None:
+    def task(self, task: "Task", between: Optional[Tuple[time, time]] = None) -> None:
         self.tasks.append(task)
+
+        if between is not None:
+            variable = len(self.tasks) - 1
+            # Map from times to datetimes
+            dt_between = tuple(map(lambda x: self.today.replace(
+                hour=x.hour,
+                minute=x.minute,
+                second=x.second,
+                microsecond=x.microsecond
+            ), between))
+            self.constraints.append(BetweenConstraint(variable, task, *dt_between))
 
     def solve(self) -> "PlannedSchedule":
         tags = []
         slots = list(slice_day(self.today, self.interval))
-        vars_to_tasks = dict(enumerate(self.tasks))
+        # We use the index of the tasks array as variables - dumb, but it works
+        variables = list(range(len(self.tasks)))
 
         problem = solver.Problem(solver.MinConflictsSolver())
 
-        problem.addVariables(vars_to_tasks.keys(), slots)
+        problem.addVariables(variables, slots)
 
         problem.addConstraint(
             solver.AllDifferentConstraint()
         )  # Don't multi-assign slots
 
         for constraint in self.constraints:
-            problem.addConstraint(constraint.constrain())
+            problem.addConstraint(constraint.constraint, constraint.variables)
 
         # Also, don't overlap time assignments
-        for var_a, var_b in combinations(vars_to_tasks.keys(), 2):
-            task_a = vars_to_tasks[var_a]
-            task_b = vars_to_tasks[var_b]
+        for var_a, var_b in combinations(variables, 2):
+            task_a = self.tasks[var_a]
+            task_b = self.tasks[var_b]
 
             def _dont_overlap(timestamp_a: int, timestamp_b: int) -> bool:
                 time_a = datetime.fromtimestamp(timestamp_a)
@@ -58,7 +70,7 @@ class Schedule:
 
         # map solutions to tasks to make tags
         for variable, slot in solution.items():
-            task = vars_to_tasks[variable]
+            task = self.tasks[variable]
             start = datetime.fromtimestamp(slot)
             stop = start + task.duration
             tags.append(task.tag(start, stop))
@@ -66,10 +78,22 @@ class Schedule:
         return PlannedSchedule(*tags)
 
     def start_time(self, time: time) -> None:
-        self.constraints.append(StartTimeConstraint(time, self.today))
+        when = self.today.replace(
+            hour=time.hour,
+            minute=time.minute,
+            second=time.second,
+            microsecond=time.microsecond,
+        )
+        self.constraints.append(StartTimeConstraint(when))
 
     def stop_time(self, time: time) -> None:
-        self.constraints.append(StopTimeConstraint(time, self.today))
+        when = self.today.replace(
+            hour=time.hour,
+            minute=time.minute,
+            second=time.second,
+            microsecond=time.microsecond,
+        )
+        self.constraints.append(StopTimeConstraint(when))
 
 
 class PlannedSchedule:
@@ -108,38 +132,44 @@ class Task:
 
 
 class Constraint:
-    def constrain(self, vars_to_tasks: Dict[int, "Task"]) -> solver.Constraint:
-        raise NotImplementedError("ABC Must be implemented")
+    # TODO - implement the ABC interface
+    @property
+    def variables(self) -> Optional[List[int]]:
+        return None  # means 'all variables'
 
 
 class StartTimeConstraint(Constraint):
-    def __init__(self, time: time, today: datetime) -> None:
-        self.time = time
-        self.today = today
+    def __init__(self, when: datetime) -> None:
+        self.when = when.timestamp()
 
-    def constrain(self) -> solver.Constraint:
-        start_time = self.today.replace(
-            hour=self.time.hour,
-            minute=self.time.minute,
-            second=self.time.second,
-            microsecond=self.time.microsecond,
-        ).timestamp()
-        return solver.FunctionConstraint(lambda *xs: all(x > start_time for x in xs))
+    @property
+    def constraint(self) -> solver.Constraint:
+        return solver.FunctionConstraint(lambda *xs: all(x > self.when for x in xs))
 
 
 class StopTimeConstraint(Constraint):
-    def __init__(self, time: time, today: datetime) -> None:
-        self.time = time
-        self.today = today
+    def __init__(self, when: datetime) -> None:
+        self.when = when.timestamp()
 
-    def constrain(self) -> solver.Constraint:
-        stop_time = self.today.replace(
-            hour=self.time.hour,
-            minute=self.time.minute,
-            second=self.time.second,
-            microsecond=self.time.microsecond,
-        ).timestamp()
-        return solver.FunctionConstraint(lambda *xs: all(x < stop_time for x in xs))
+    @property
+    def constraint(self) -> solver.Constraint:
+        return solver.FunctionConstraint(lambda *xs: all(x < self.when for x in xs))
+
+
+class BetweenConstraint(Constraint):
+    def __init__(self, variable: int, task: "Task", begin: datetime, end: datetime) -> None:
+        self.variable = variable
+        self.task = task
+        self.begin = begin.timestamp()
+        self.end = end.timestamp()
+
+    @property
+    def constraint(self) -> solver.Constraint:
+        return solver.FunctionConstraint(lambda x: self.begin < x < self.end, [self.variable])
+
+    @property
+    def variables(self) -> Optional[List[int]]:
+        return [self.variable]
 
 
 def slice_day(day: datetime, interval: timedelta) -> Iterator[float]:

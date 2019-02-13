@@ -18,15 +18,15 @@ schedule.task(trash)
 
 # Eat Breakfast
 breakfast = Task("Eat breakfast", duration=timedelta(minutes=45))
-schedule.task(breakfast)
+schedule.task(breakfast, between=(time(hour=8), time(hour=10)))
 
 # Eat Lunch
 lunch = Task("Eat lunch", duration=timedelta(minutes=45))
-schedule.task(lunch)
+schedule.task(lunch, between=(time(hour=12), time(hour=14)))
 
 # Eat Dinner
 dinner = Task("Eat dinner", duration=timedelta(minutes=60))
-schedule.task(dinner)
+schedule.task(dinner, between=(time(hour=19), time(hour=21)))
 
 # Do dishes after 8pm and after dinner
 dishes = Task("Do the dishes", duration=timedelta(minutes=15))
