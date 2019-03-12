@@ -1,7 +1,7 @@
 from datetime import datetime, time, timedelta
 from itertools import combinations
 from operator import attrgetter
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple, Type
 
 import constraint as solver
 
@@ -22,9 +22,9 @@ class Schedule:
 
     def task(self, task: "Task", between: Optional[Tuple[time, time]] = None) -> None:
         self.tasks.append(task)
+        task.solver_variable = len(self.tasks) - 1
 
         if between is not None:
-            variable = len(self.tasks) - 1
             # Map from times to datetimes
             dt_between = tuple(map(lambda x: self.today.replace(
                 hour=x.hour,
@@ -32,7 +32,7 @@ class Schedule:
                 second=x.second,
                 microsecond=x.microsecond
             ), between))
-            self.constraints.append(BetweenConstraint(variable, task, *dt_between))
+            task.constrain(BetweenConstraint, *dt_between)
 
     def solve(self) -> "PlannedSchedule":
         tags = []
@@ -48,10 +48,19 @@ class Schedule:
             solver.AllDifferentConstraint()
         )  # Don't multi-assign slots
 
+        # Add schedule-general constraints
         for constraint in self.constraints:
             problem.addConstraint(constraint.constraint, constraint.variables)
 
+        # Add task-specific constraints
+        for task in self.tasks:
+            for constraint in task.constraints:
+                # Maybe this should use the tasks's variable rather than the constraints?
+                # Hard to say
+                problem.addConstraint(constraint.constraint, constraint.variables)
+
         # Also, don't overlap time assignments
+        # This will eventually need to be redone to handle cases of sub-tasks
         for var_a, var_b in combinations(variables, 2):
             task_a = self.tasks[var_a]
             task_b = self.tasks[var_b]
@@ -116,8 +125,11 @@ class Task:
     task_name: str = "Untitled Task"
     duration: timedelta = timedelta(hours=1)
     gap: timedelta = timedelta(minutes=5)
+    constraints: List["Constraint"] = None
+    solver_variable: Optional[int] = None
 
     def __init__(self, name: Optional[str] = None, duration: Optional[timedelta] = None) -> None:
+        self.constraints = []
         if name is not None:
             self.task_name = name
 
@@ -129,6 +141,11 @@ class Task:
 
     def tag(self, start: datetime, stop: datetime) -> Tag:
         return Tag(name=self.task_name, valid_from=start, valid_to=stop)
+
+    def constrain(self, constraint_type: Type["Constraint"], *args) -> None:
+        if self.solver_variable is None:
+            raise ValueError("You must assign this task a variable before you may constrain it.")
+        self.constraints.append(constraint_type(self.solver_variable, *args))
 
 
 class Constraint:
@@ -157,9 +174,8 @@ class StopTimeConstraint(Constraint):
 
 
 class BetweenConstraint(Constraint):
-    def __init__(self, variable: int, task: "Task", begin: datetime, end: datetime) -> None:
+    def __init__(self, variable: int, begin: datetime, end: datetime) -> None:
         self.variable = variable
-        self.task = task
         self.begin = begin.timestamp()
         self.end = end.timestamp()
 

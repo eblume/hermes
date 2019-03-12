@@ -215,10 +215,12 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
                 "maxResults": 2500,
             }
             # There are tons of other query params to look in to. Also, live syncing!
+            begins_at_rfc3339 = begins_at.isoformat() + ("Z" if begins_at.tzinfo is None else "")
+            finish_at_rfc3339 = finish_at.isoformat() + ("Z" if finish_at.tzinfo is None else "")
             if begins_at:
-                query_params["timeMin"] = begins_at.isoformat()
+                query_params["timeMin"] = begins_at_rfc3339
             if finish_at:
-                query_params["timeMax"] = finish_at.isoformat()
+                query_params["timeMax"] = finish_at_rfc3339
             if page_token:
                 query_params["pageToken"] = page_token
 

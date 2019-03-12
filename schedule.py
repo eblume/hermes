@@ -11,6 +11,7 @@ schedule.task(medicine)
 # Drink metamucil but not within 1 hour of taking medicine
 metamucil = Task("Drink metamucil", duration=timedelta(minutes=10))
 schedule.task(metamucil)
+# schedule.not_within(medicine, metamucil, timedelta(minutes=60))
 
 # Take out trash after 8pm
 trash = Task("Take out the trash", duration=timedelta(minutes=30))
