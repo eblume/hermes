@@ -38,6 +38,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         base_category: Category = None,
     ) -> None:
         self._cached_timespan: Optional[BaseTimeSpan] = None
+        self._service = None
 
         self.begins_at: Optional[dt.datetime] = begins_at
         self.finish_at: Optional[dt.datetime] = finish_at
@@ -77,13 +78,52 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         self._cached_timespan = self.load_gcal()
         return self
 
-    def load_gcal(
-        self,
-        begins_at: Optional[dt.datetime] = None,
-        finish_at: Optional[dt.datetime] = None,
-        oauth_config: Optional[Path] = None,
-        base_category: Category = None,
-    ) -> SqliteTimeSpan:
+    def calendars(self) -> Iterable[str]:
+        page_token = None
+        while True:
+            calendar_list = self.service.calendarList().list(pageToken=page_token).execute()
+            yield from calendar_list["items"]
+            page_token = calendar_list.get("nextPageToken")
+            if page_token is None:
+                break
+
+    @property
+    def service(self):  # type?
+        if self._service:
+            return self._service
+
+        # TODO - figure out a nicer way to handle OAuth cycle
+        appname = "HermesCLI"
+        appauthor = "Hermes"
+        service_name = "calendar"
+        version = "v3"
+
+        if self.oauth_config_path is None:
+            config_dir: str = user_data_dir(appname, appauthor)
+            self.oauth_config_path = Path(config_dir) / "gcal.json"
+        client_secrets = str(self.oauth_config_path)
+
+        token_store = file.Storage(service_name + ".token")
+        with warnings.catch_warnings():
+            # This warns on 'file not found' which is handled below.
+            credentials = token_store.get()
+        if credentials is None or credentials.invalid:
+            flow = oauth2_client.flow_from_clientsecrets(
+                client_secrets,
+                scope="https://www.googleapis.com/auth/calendar.readonly",
+                message=tools.message_if_missing(client_secrets),
+            )
+            credentials = tools.run_flow(flow, token_store)
+        http = credentials.authorize(http=build_http())
+
+        # TODO - support offline discovery file
+        # (see discovery.build_from_document)
+        self._service = discovery.build(
+            service_name, version, http=http, cache_discovery=False
+        )
+        return self._service
+
+    def load_gcal(self) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
         THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
@@ -101,112 +141,51 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         '/home/erich/.local/share/HermesCLI'
         '/Users/erich/Library/Application Support/HermesCLI'
         """
-        begins_at = begins_at or self.begins_at
-        finish_at = finish_at or self.finish_at
-        base_category = (
-            base_category or self.base_category or self.DEFAULT_BASE_CATEGORY
-        )
-        oauth_config = oauth_config or self.oauth_config_path
+        return SqliteTimeSpan(set(self._tag_events_from_service()))
 
-        # TODO - figure out a nicer way to handle OAuth cycle
-        appname = "HermesCLI"
-        appauthor = "Hermes"
-        service_name = "calendar"
-        version = "v3"
-
-        if oauth_config is None:
-            config_dir: str = user_data_dir(appname, appauthor)
-            oauth_config = Path(config_dir) / "gcal.json"
-        client_secrets = str(oauth_config)
-
-        token_store = file.Storage(service_name + ".token")
-        with warnings.catch_warnings():
-            # This warns on 'file not found' which is handled below.
-            credentials = token_store.get()
-        if credentials is None or credentials.invalid:
-            flow = oauth2_client.flow_from_clientsecrets(
-                client_secrets,
-                scope="https://www.googleapis.com/auth/calendar.readonly",
-                message=tools.message_if_missing(client_secrets),
+    def _tag_events_from_service(self) -> Iterable["Tag"]:
+        for i, calendar in enumerate(self.calendars()):
+            title = calendar.get(
+                "summaryOverride", calendar.get("summary", f"Imported GCal {i}")
             )
-            credentials = tools.run_flow(flow, token_store)
-        http = credentials.authorize(http=build_http())
-
-        # TODO - support offline discovery file
-        # (see discovery.build_from_document)
-        service = discovery.build(
-            service_name, version, http=http, cache_discovery=False
-        )
-        return SqliteTimeSpan(
-            set(
-                self._tag_events_from_service(
-                    begins_at, finish_at, base_category, service
+            title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
+            category = Category(title, self.base_category)
+            # calendar_resource = service.calendars().get(calendarId=calendar['id']).execute()
+            # ^ unclear if there's anything useful there, I think we get the same data from calendarList
+            # details that are different:
+            # * etag is different. Totally unclear what this is.
+            # * missing from calendar_resource: summaryOverride, backgroundColor, defaultReminders, accessRole, foregroundColor, colorId
+            # * (none missing in reverse)
+            # Conclusion: for at least some calendars, we get nothing useful
+            for event in self._retrieve_events_from_calendar(calendar):
+                start = event.get("start")
+                end = event.get("end")
+                valid_from = (
+                    date_parse(
+                        start.get("dateTime", start.get("date", None)),
+                        ignoretz=True,
+                    )
+                    if start
+                    else None
                 )
-            )
-        )
-
-    def _tag_events_from_service(
-        self,
-        begins_at: Optional[dt.datetime],
-        finish_at: Optional[dt.datetime],
-        root_category: Category,
-        service,
-    ) -> Iterable["Tag"]:
-        page_token = None
-        while True:
-            calendar_list = service.calendarList().list(pageToken=page_token).execute()
-            for i, calendar in enumerate(calendar_list["items"]):
-                title = calendar.get(
-                    "summaryOverride", calendar.get("summary", f"Imported GCal {i}")
+                valid_to = (
+                    date_parse(
+                        end.get("dateTime", end.get("date", None)), ignoretz=True
+                    )
+                    if end
+                    else None
                 )
-                title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
-                category = Category(title, root_category)
-                # calendar_resource = service.calendars().get(calendarId=calendar['id']).execute()
-                # ^ unclear if there's anything useful there, I think we get the same data from calendarList
-                # details that are different:
-                # * etag is different. Totally unclear what this is.
-                # * missing from calendar_resource: summaryOverride, backgroundColor, defaultReminders, accessRole, foregroundColor, colorId
-                # * (none missing in reverse)
-                # Conclusion: for at least some calendars, we get nothing useful
-                for event in self._retrieve_events_from_calendar(
-                    calendar, service, begins_at, finish_at
-                ):
-                    start = event.get("start")
-                    end = event.get("end")
-                    valid_from = (
-                        date_parse(
-                            start.get("dateTime", start.get("date", None)),
-                            ignoretz=True,
-                        )
-                        if start
-                        else None
-                    )
-                    valid_to = (
-                        date_parse(
-                            end.get("dateTime", end.get("date", None)), ignoretz=True
-                        )
-                        if end
-                        else None
-                    )
-                    yield Tag(
-                        name=event.get("summary", event.get("id")),
-                        category=category,
-                        valid_from=valid_from,
-                        valid_to=valid_to,
-                    )
+                yield Tag(
+                    name=event.get("summary", event.get("id")),
+                    category=category,
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                )
 
-            page_token = calendar_list.get("nextPageToken")
-            if not page_token:
-                break
-
-    def _retrieve_events_from_calendar(
-        self,
-        calendar,
-        service,
-        begins_at: Optional[dt.datetime] = None,
-        finish_at: Optional[dt.datetime] = None,
-    ):
+    def _retrieve_events_from_calendar(self, calendar):
         # https://developers.google.com/calendar/v3/reference/events/list
+        begins_at = self.begins_at
+        finish_at = self.finish_at
         page_token = None
         while True:
             query_params = {
@@ -224,7 +203,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             if page_token:
                 query_params["pageToken"] = page_token
 
-            events = service.events().list(**query_params).execute()
+            events = self.service.events().list(**query_params).execute()
             yield from events["items"]
 
             page_token = events.get("nextPageToken", None)
