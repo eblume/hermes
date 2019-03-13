@@ -26,12 +26,17 @@ class Schedule:
 
         if between is not None:
             # Map from times to datetimes
-            dt_between = tuple(map(lambda x: self.today.replace(
-                hour=x.hour,
-                minute=x.minute,
-                second=x.second,
-                microsecond=x.microsecond
-            ), between))
+            dt_between = tuple(
+                map(
+                    lambda x: self.today.replace(
+                        hour=x.hour,
+                        minute=x.minute,
+                        second=x.second,
+                        microsecond=x.microsecond,
+                    ),
+                    between,
+                )
+            )
             task.constrain(BetweenConstraint, *dt_between)
 
     def solve(self) -> "PlannedSchedule":
@@ -128,7 +133,9 @@ class Task:
     constraints: List["Constraint"] = None
     solver_variable: Optional[int] = None
 
-    def __init__(self, name: Optional[str] = None, duration: Optional[timedelta] = None) -> None:
+    def __init__(
+        self, name: Optional[str] = None, duration: Optional[timedelta] = None
+    ) -> None:
         self.constraints = []
         if name is not None:
             self.task_name = name
@@ -144,7 +151,9 @@ class Task:
 
     def constrain(self, constraint_type: Type["Constraint"], *args) -> None:
         if self.solver_variable is None:
-            raise ValueError("You must assign this task a variable before you may constrain it.")
+            raise ValueError(
+                "You must assign this task a variable before you may constrain it."
+            )
         self.constraints.append(constraint_type(self.solver_variable, *args))
 
 
@@ -181,7 +190,9 @@ class BetweenConstraint(Constraint):
 
     @property
     def constraint(self) -> solver.Constraint:
-        return solver.FunctionConstraint(lambda x: self.begin < x < self.end, [self.variable])
+        return solver.FunctionConstraint(
+            lambda x: self.begin < x < self.end, [self.variable]
+        )
 
     @property
     def variables(self) -> Optional[List[int]]:

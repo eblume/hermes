@@ -22,8 +22,8 @@ from ..timespan import BaseTimeSpan, SqliteTimeSpan
 
 class GoogleServiceClient:
     # Subclasses should change to implement a service
-    SERVICE_NAME = 'DefaultService'  # will be part of a file name
-    SERVICE_SCOPE = 'http://www.example.com/api'
+    SERVICE_NAME = "DefaultService"  # will be part of a file name
+    SERVICE_SCOPE = "http://www.example.com/api"
 
     # Probably won't need to change ever
     SERVICE_APP_NAME = "HermesCLI"
@@ -73,8 +73,8 @@ class GoogleServiceClient:
 
 
 class GoogleCalendarClient(GoogleServiceClient):
-    SERVICE_NAME = 'calendar'
-    SERVICE_SCOPE = 'https://www.googleapis.com/auth/calendar'
+    SERVICE_NAME = "calendar"
+    SERVICE_SCOPE = "https://www.googleapis.com/auth/calendar"
 
     DEFAULT_BASE_CATEGORY = Category("GCal", None)
 
@@ -91,22 +91,26 @@ class GoogleCalendarClient(GoogleServiceClient):
         self.begins_at: Optional[dt.datetime] = begins_at
         self.finish_at: Optional[dt.datetime] = finish_at
         self.calendar_id: Optional[str] = calendar_id
-        self.base_category: Optional[Category] = base_category or self.DEFAULT_BASE_CATEGORY
+        self.base_category: Optional[
+            Category
+        ] = base_category or self.DEFAULT_BASE_CATEGORY
 
     def calendars(self) -> Iterable[str]:
         page_token = None
         while True:
-            calendar_list = self.service.calendarList().list(pageToken=page_token).execute()
+            calendar_list = (
+                self.service.calendarList().list(pageToken=page_token).execute()
+            )
             yield from calendar_list["items"]
             page_token = calendar_list.get("nextPageToken")
             if page_token is None:
                 break
 
-    def calendar(self, calendar_id: str = 'primary') -> Dict[str, Any]:
+    def calendar(self, calendar_id: str = "primary") -> Dict[str, Any]:
         # Note that the info returned by calendars() is slightly disjoint.
         return self.service.calendars().get(calendarId=calendar_id).execute()
 
-    def load_gcal(self, calendar_id: str = 'primary') -> SqliteTimeSpan:
+    def load_gcal(self, calendar_id: str = "primary") -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
         THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
@@ -143,16 +147,13 @@ class GoogleCalendarClient(GoogleServiceClient):
             end = event.get("end")
             valid_from = (
                 date_parse(
-                    start.get("dateTime", start.get("date", None)),
-                    ignoretz=True,
+                    start.get("dateTime", start.get("date", None)), ignoretz=True
                 )
                 if start
                 else None
             )
             valid_to = (
-                date_parse(
-                    end.get("dateTime", end.get("date", None)), ignoretz=True
-                )
+                date_parse(end.get("dateTime", end.get("date", None)), ignoretz=True)
                 if end
                 else None
             )
@@ -166,11 +167,15 @@ class GoogleCalendarClient(GoogleServiceClient):
     def _retrieve_events_from_calendar(self, calendar_id: str):
         # https://developers.google.com/calendar/v3/reference/events/list
         if self.begins_at is not None:
-            begins_at = self.begins_at.isoformat() + ("Z" if self.begins_at.tzinfo is None else "")
+            begins_at = self.begins_at.isoformat() + (
+                "Z" if self.begins_at.tzinfo is None else ""
+            )
         else:
             begins_at = None
         if self.finish_at is not None:
-            finish_at = self.finish_at.isoformat() + ("Z" if self.finish_at.tzinfo is None else "")
+            finish_at = self.finish_at.isoformat() + (
+                "Z" if self.finish_at.tzinfo is None else ""
+            )
         else:
             finish_at = None
 
@@ -200,7 +205,11 @@ class GoogleCalendarClient(GoogleServiceClient):
 class GoogleCalendarTimeSpan(BaseTimeSpan):
     "Convenience wrapper that bridges from the GoogleCalendarClient to a TimeSpan."
 
-    def __init__(self, client: Optional[GoogleCalendarClient] = None, calendar_id: str = "primary"):
+    def __init__(
+        self,
+        client: Optional[GoogleCalendarClient] = None,
+        calendar_id: str = "primary",
+    ):
         if client is None:
             self.client = GoogleCalendarClient()
         else:
@@ -228,5 +237,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
     def filter(self, category: Union["Category", str]) -> BaseTimeSpan:
         return self._cached_timespan.filter(category)
 
-    def reslice(self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]) -> "BaseTimeSpan":
+    def reslice(
+        self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
+    ) -> "BaseTimeSpan":
         return self._cached_timespan.reslice(begins_at, finish_at)
