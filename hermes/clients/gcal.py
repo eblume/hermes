@@ -74,7 +74,7 @@ class GoogleServiceClient:
 
 class GoogleCalendarClient(GoogleServiceClient):
     SERVICE_NAME = 'calendar'
-    SERVICE_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
+    SERVICE_SCOPE = 'https://www.googleapis.com/auth/calendar'
 
     DEFAULT_BASE_CATEGORY = Category("GCal", None)
 
