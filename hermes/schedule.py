@@ -1,7 +1,9 @@
+# -*- coding: utf-8 -*-
+import abc
 from datetime import datetime, time, timedelta
 from itertools import combinations
 from operator import attrgetter
-from typing import Iterator, List, Optional, Tuple, Type
+from typing import Iterator, List, Optional, Tuple
 
 import constraint as solver
 
@@ -37,7 +39,7 @@ class Schedule:
                     between,
                 )
             )
-            task.constrain(BetweenConstraint, *dt_between)
+            task.constrain(BetweenConstraint(task.solver_variable, *dt_between))
 
     def solve(self) -> "PlannedSchedule":
         tags = []
@@ -120,28 +122,22 @@ class PlannedSchedule:
         for i, task in enumerate(
             sorted(self.plan.iter_tags(), key=attrgetter("valid_from"))
         ):
-            print(
-                f"[{i+1}] {task.name}: {task.valid_from.time().isoformat()} to {task.valid_to.time().isoformat()}"
-            )
+            window = f"{task.valid_from.time().isoformat() if task.valid_from else '...'} to {task.valid_to.time().isoformat() if task.valid_to else '...'}"
+            print(f"[{i+1}] {task.name}: {window}")
 
 
 class Task:
-
-    task_name: str = "Untitled Task"
-    duration: timedelta = timedelta(hours=1)
-    gap: timedelta = timedelta(minutes=5)
-    constraints: List["Constraint"] = None
-    solver_variable: Optional[int] = None
-
     def __init__(
-        self, name: Optional[str] = None, duration: Optional[timedelta] = None
+        self,
+        name: str = "Untitled Task",
+        duration: timedelta = timedelta(hours=1),
+        gap: timedelta = timedelta(minutes=5),
     ) -> None:
-        self.constraints = []
-        if name is not None:
-            self.task_name = name
-
-        if duration is not None:
-            self.duration = duration
+        self.constraints: List["Constraint"] = []
+        self.task_name = name
+        self.duration = duration
+        self.gap = gap
+        self.solver_variable: Optional[int] = None
 
     def __str__(self) -> str:
         return self.task_name
@@ -149,19 +145,19 @@ class Task:
     def tag(self, start: datetime, stop: datetime) -> Tag:
         return Tag(name=self.task_name, valid_from=start, valid_to=stop)
 
-    def constrain(self, constraint_type: Type["Constraint"], *args) -> None:
-        if self.solver_variable is None:
-            raise ValueError(
-                "You must assign this task a variable before you may constrain it."
-            )
-        self.constraints.append(constraint_type(self.solver_variable, *args))
+    def constrain(self, constraint: "Constraint") -> None:
+        self.constraints.append(constraint)
 
 
-class Constraint:
-    # TODO - implement the ABC interface
+class Constraint(metaclass=abc.ABCMeta):
     @property
     def variables(self) -> Optional[List[int]]:
         return None  # means 'all variables'
+
+    @abc.abstractproperty
+    @property
+    def constraint(self) -> solver.Constraint:
+        raise NotImplementedError("Subclasses must define this interface")
 
 
 class StartTimeConstraint(Constraint):

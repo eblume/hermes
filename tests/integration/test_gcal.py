@@ -30,7 +30,11 @@ def test_has_events(gcal_march_2019):
 def test_alternate_creation_args():
     begin = date_parse("11 March 2019 00:00:00 PDT")
     finish = date_parse("11 March 2019 23:59:59 PDT")
-    tags_a = set(GoogleCalendarTimeSpan(GoogleCalendarClient(begins_at=begin, finish_at=finish)).iter_tags())
+    tags_a = set(
+        GoogleCalendarTimeSpan(
+            GoogleCalendarClient(begins_at=begin, finish_at=finish)
+        ).iter_tags()
+    )
     tags_b = set(GoogleCalendarTimeSpan()[begin:finish].iter_tags())
     assert tags_a == tags_b
     assert len(tags_a) == 3

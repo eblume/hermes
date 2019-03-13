@@ -166,18 +166,17 @@ class GoogleCalendarClient(GoogleServiceClient):
 
     def _retrieve_events_from_calendar(self, calendar_id: str):
         # https://developers.google.com/calendar/v3/reference/events/list
+        begins_at: Optional[str] = None
         if self.begins_at is not None:
             begins_at = self.begins_at.isoformat() + (
                 "Z" if self.begins_at.tzinfo is None else ""
             )
-        else:
-            begins_at = None
+
+        finish_at: Optional[str] = None
         if self.finish_at is not None:
             finish_at = self.finish_at.isoformat() + (
                 "Z" if self.finish_at.tzinfo is None else ""
             )
-        else:
-            finish_at = None
 
         page_token = None
         while True:

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from datetime import time, timedelta
 
 from hermes.schedule import Schedule, Task
