@@ -1,3 +1,3 @@
 #!/bin/sh
 
-exec poetry run python -m pytest
+exec poetry run python -m pytest $@

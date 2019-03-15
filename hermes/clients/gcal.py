@@ -82,7 +82,6 @@ class GoogleCalendarClient(GoogleServiceClient):
         self,
         begins_at: Optional[dt.datetime] = None,
         finish_at: Optional[dt.datetime] = None,
-        calendar_id: Optional[str] = None,
         base_category: Category = None,
         **kwargs,
     ) -> None:
@@ -90,7 +89,6 @@ class GoogleCalendarClient(GoogleServiceClient):
 
         self.begins_at: Optional[dt.datetime] = begins_at
         self.finish_at: Optional[dt.datetime] = finish_at
-        self.calendar_id: Optional[str] = calendar_id
         self.base_category: Optional[
             Category
         ] = base_category or self.DEFAULT_BASE_CATEGORY
@@ -129,11 +127,7 @@ class GoogleCalendarClient(GoogleServiceClient):
         '/Users/erich/Library/Application Support/HermesCLI'
         """
         return SqliteTimeSpan(
-            set(
-                self._tag_events_from_service(
-                    calendar_id or self.calendar_id or "primary"
-                )
-            )
+            set(self._tag_events_from_service(calendar_id or "primary"))
         )
 
     def _tag_events_from_service(self, calendar_id: str) -> Iterable["Tag"]:
@@ -233,11 +227,11 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
 
     @classmethod
     def calendar_by_name(
-        cls: Type[T], calendar_name: str, ignore_case: bool = True
+        cls: Type[T], calendar_name: str, ignore_case: bool = True, **client_kwargs
     ) -> T:
         calendar_id: Optional[str] = None
         search_cal = calendar_name.lower() if ignore_case else calendar_name
-        client = GoogleCalendarClient()
+        client = GoogleCalendarClient(**client_kwargs)
         for calendar in client.calendars():
             title = calendar.get("summary", "")
             if ignore_case:
@@ -248,7 +242,7 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         if calendar_id is None:
             raise KeyError("Calendar not found")
 
-        return cls(calendar_id=calendar_id)
+        return cls(calendar_id=calendar_id, client=client)
 
     @property
     def span(self) -> Span:
@@ -262,9 +256,18 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
         return self._cached_timespan.iter_tags()
 
     def filter(self, category: Union["Category", str]) -> BaseTimeSpan:
+        """Note: This returns a NON-NETWORKED sqlite-backed timespan. It does
+        NOT retain the google service connection. Filtering a google calendar
+        is not currently supported, but you can use this method to approximate
+        it by creating a new google calendar with the resulting timespan."""
         return self._cached_timespan.filter(category)
 
     def reslice(
         self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
-    ) -> "BaseTimeSpan":
-        return self._cached_timespan.reslice(begins_at, finish_at)
+    ) -> "GoogleCalendarTimeSpan":
+        newclient = GoogleCalendarClient(
+            begins_at=begins_at,
+            finish_at=finish_at,
+            base_category=self.client.base_category,
+        )
+        return GoogleCalendarTimeSpan(client=newclient, calendar_id=self.calendar_id)
