@@ -9,11 +9,17 @@ import apsw
 
 import attr
 
-from dateutil.parser import parse as date_parse
+from dateutil.parser import parse as date_parse_base
 
 from .categorypool import BaseCategoryPool, CategoryPool, MutableCategoryPool
 from .span import Span, Spannable
 from .tag import Category, Tag
+
+
+def date_parse(datestring: str):
+    """Parse a date string, and also set the timezone to UTC. Reads TZ info
+    from input string, if present, or else assumes local time."""
+    return date_parse_base(datestring).astimezone(dt.timezone.utc)
 
 
 class BaseTimeSpan(Spannable, metaclass=abc.ABCMeta):
@@ -123,22 +129,26 @@ class TimeSpan(BaseTimeSpan):
         return TimeSpan(tags)
 
 
-class InsertableTimeSpan(BaseTimeSpan):
+class InsertableTimeSpan(BaseTimeSpan, metaclass=abc.ABCMeta):
+    @abc.abstractmethod
     def insert_tag(self, tag: Tag) -> None:
         raise NotImplementedError("Subclasses must define this interface.")
 
 
-class RemovableTimeSpan(BaseTimeSpan):
+class RemovableTimeSpan(BaseTimeSpan, metaclass=abc.ABCMeta):
+    @abc.abstractmethod
     def remove_tag(self, tag: Tag) -> bool:
         """Remove the specified tag. Return true iff the tag was found."""
         raise NotImplementedError("Subclasses must define this interface.")
 
 
-class WriteableTimeSpan(BaseTimeSpan):
+class WriteableTimeSpan(BaseTimeSpan, metaclass=abc.ABCMeta):
+    @abc.abstractmethod
     def write_to(self, filename: Path) -> None:
         raise NotImplementedError("Subclasses must define this interface.")
 
     @classmethod
+    @abc.abstractmethod
     def read_from(cls, filename: Path) -> BaseTimeSpan:
         raise NotImplementedError("Subclasses must define this interface.")
 

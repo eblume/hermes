@@ -2,12 +2,11 @@
 import datetime as dt
 import re
 import warnings
+from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Type, TypeVar, Union
+from typing import Any, Deque, Dict, Iterable, Optional, Tuple, Type, TypeVar, Union
 
 from appdirs import user_data_dir
-
-from dateutil.parser import parse as date_parse
 
 from googleapiclient import discovery
 from googleapiclient.http import build_http
@@ -15,15 +14,21 @@ from googleapiclient.http import build_http
 from oauth2client import client as oauth2_client, file, tools
 
 from ..categorypool import BaseCategoryPool
-from ..span import Span
+from ..span import Span, Spannable
 from ..tag import Category, Tag
-from ..timespan import BaseTimeSpan, SqliteTimeSpan
+from ..timespan import (
+    BaseTimeSpan,
+    InsertableTimeSpan,
+    RemovableTimeSpan,
+    SqliteTimeSpan,
+    date_parse,
+)
 
 
 class GoogleServiceClient:
     # Subclasses should change to implement a service
     SERVICE_NAME = "DefaultService"  # will be part of a file name
-    SERVICE_SCOPE = "http://www.example.com/api"
+    SERVICE_SCOPE: Union[str, Iterable[str]] = "http://www.example.com/api"
 
     # Probably won't need to change ever
     SERVICE_APP_NAME = "HermesCLI"
@@ -72,9 +77,12 @@ class GoogleServiceClient:
         return self._service
 
 
-class GoogleCalendarClient(GoogleServiceClient):
+class GoogleCalendarClient(GoogleServiceClient, Spannable):
     SERVICE_NAME = "calendar"
-    SERVICE_SCOPE = "https://www.googleapis.com/auth/calendar"
+    SERVICE_SCOPE = [
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.readonly",
+    ]
 
     DEFAULT_BASE_CATEGORY = Category("GCal", None)
 
@@ -87,11 +95,19 @@ class GoogleCalendarClient(GoogleServiceClient):
     ) -> None:
         super().__init__(**kwargs)
 
-        self.begins_at: Optional[dt.datetime] = begins_at
-        self.finish_at: Optional[dt.datetime] = finish_at
+        self.begins_at: Optional[dt.datetime] = begins_at.astimezone(
+            dt.timezone.utc
+        ) if begins_at else None
+        self.finish_at: Optional[dt.datetime] = finish_at.astimezone(
+            dt.timezone.utc
+        ) if finish_at else None
         self.base_category: Optional[
             Category
         ] = base_category or self.DEFAULT_BASE_CATEGORY
+
+    @property
+    def span(self) -> Span:
+        return Span(begins_at=self.begins_at, finish_at=self.finish_at)
 
     def calendars(self) -> Iterable[Dict[str, Any]]:
         page_token = None
@@ -107,6 +123,21 @@ class GoogleCalendarClient(GoogleServiceClient):
     def calendar(self, calendar_id: str = "primary") -> Dict[str, Any]:
         # Note that the info returned by calendars() is slightly disjoint.
         return self.service.calendars().get(calendarId=calendar_id).execute()
+
+    def create_event(self, tag: Tag, calendar_id: str) -> Dict[str, Any]:
+        if tag.valid_from is None or tag.valid_to is None:
+            raise ValueError("Events must have concrete start and end times")
+        start: dt.datetime = tag.valid_from
+        end: dt.datetime = tag.valid_to
+        event = {
+            "summary": tag.name,
+            "description": tag.category.fullpath if tag.category else "",
+            "start": {"dateTime": start.isoformat(), "timeZone": start.tzname()},
+            "end": {"dateTime": end.isoformat(), "timeZone": end.tzname()},
+        }
+        return (
+            self.service.events().insert(calendarId=calendar_id, body=event).execute()
+        )
 
     def load_gcal(self, calendar_id: Optional[str] = None) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
@@ -146,16 +177,12 @@ class GoogleCalendarClient(GoogleServiceClient):
             start = event.get("start")
             end = event.get("end")
             valid_from = (
-                date_parse(
-                    start.get("dateTime", start.get("date", None)), ignoretz=True
-                )
+                date_parse(start.get("dateTime", start.get("date", None)))
                 if start
                 else None
             )
             valid_to = (
-                date_parse(end.get("dateTime", end.get("date", None)), ignoretz=True)
-                if end
-                else None
+                date_parse(end.get("dateTime", end.get("date", None))) if end else None
             )
             yield Tag(
                 name=event.get("summary", event.get("id")),
@@ -204,7 +231,7 @@ class GoogleCalendarClient(GoogleServiceClient):
 T = TypeVar("T", bound="GoogleCalendarTimeSpan")
 
 
-class GoogleCalendarTimeSpan(BaseTimeSpan):
+class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
     "Convenience wrapper that bridges from the GoogleCalendarClient to a TimeSpan."
 
     def __init__(
@@ -218,26 +245,31 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             self.client = client
         self.calendar_id = calendar_id
 
-        if calendar_id is not None:
-            self._cached_timespan = self.client.load_gcal(self.calendar_id)
-        else:
-            self._cached_timespan = SqliteTimeSpan()
+        calendar = self.client.calendar(self.calendar_id)
+        self.calendar_name = calendar.get(
+            "summary", f"Unknown Calendar: {self.calendar_id}"
+        )
 
-        self.client = GoogleCalendarClient()
+        self._cached_timespan = self.client.load_gcal(self.calendar_id)
+
+        # Item( is_insert, tag ) -- is_insert == False means is delete
+        self.dirty_queue: Deque[Tuple[bool, Tag]] = deque()
 
     @classmethod
     def calendar_by_name(
         cls: Type[T], calendar_name: str, ignore_case: bool = True, **client_kwargs
     ) -> T:
-        calendar_id: Optional[str] = None
-        search_cal = calendar_name.lower() if ignore_case else calendar_name
         client = GoogleCalendarClient(**client_kwargs)
+
+        search_cal = calendar_name.lower() if ignore_case else calendar_name
+        calendar_id: Optional[str] = None
         for calendar in client.calendars():
             title = calendar.get("summary", "")
             if ignore_case:
                 title = title.lower()
             if title.startswith(search_cal):
                 calendar_id = calendar.get("id")
+                break
 
         if calendar_id is None:
             raise KeyError("Calendar not found")
@@ -246,7 +278,8 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
 
     @property
     def span(self) -> Span:
-        return self._cached_timespan.span
+        # TODO - do we need to enforce this span on the cached timeline?
+        return self.client.span
 
     @property
     def category_pool(self) -> BaseCategoryPool:
@@ -271,3 +304,48 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             base_category=self.client.base_category,
         )
         return GoogleCalendarTimeSpan(client=newclient, calendar_id=self.calendar_id)
+
+    def insert_tag(self, tag: Tag) -> None:
+        self._cached_timespan.insert_tag(tag)  # TODO - support rollbacks?
+
+        try:  # First remove the inverse operation if it exists
+            self.dirty_queue.remove((False, tag))
+        except ValueError:
+            pass  # This just means it wasn't found
+        self.dirty_queue.append((True, tag))
+
+    def remove_tag(self, tag: Tag) -> bool:
+        success = self._cached_timespan.remove_tag(tag)  # TODO - support rollbacks?
+
+        try:  # First remove the inverse operation if it exists
+            self.dirty_queue.remove((True, tag))
+        except ValueError:
+            pass  # This just means it wasn't found
+        self.dirty_queue.append((False, tag))
+
+        return success
+
+    def add_event(self, event_name: str, when: dt.datetime, duration: dt.timedelta):
+        start = when.astimezone(dt.timezone.utc)
+        tag = Tag(
+            name=event_name,
+            category=self.client.base_category / self.calendar_name,
+            valid_from=start,
+            valid_to=start + duration,
+        )
+        self.insert_tag(tag)
+
+    def remove_event(self, event_name: str):
+        raise NotImplementedError("Not done yet - kinda complicated")
+
+    def flush(self):
+        """Write all pending changes to Google Calendar, and then re-sync."""
+        # TODO - instead of a full resync, maybe use the streaming updates API?
+        for is_insert, event in self.dirty_queue:
+            if is_insert:
+                # TODO - grab event id? not sure how to use it...
+                self.client.create_event(tag=event, calendar_id=self.calendar_id)
+            else:
+                raise NotImplementedError("Not done yet - kinda complicated")
+        self.dirty_queue.clear()
+        self._cached_timespan = self.client.load_gcal(self.calendar_id)

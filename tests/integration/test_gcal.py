@@ -2,9 +2,8 @@
 from datetime import timedelta
 from operator import attrgetter
 
-from dateutil.parser import parse as date_parse
-
 from hermes.clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
+from hermes.timespan import date_parse
 
 import pytest
 
@@ -80,18 +79,23 @@ def test_calendar_by_name(gcal_march_2019, gcal_hermes_test_id):
     assert gcal_march_2019.calendar_id == gcal_hermes_test_id
 
 
+def test_calendar_span(gcal_feb_02_2019):
+    assert gcal_feb_02_2019.span.begins_at is not None
+    assert gcal_feb_02_2019.span.finish_at is not None
+
+
 def test_create_event(gcal_feb_02_2019):
     assert len(gcal_feb_02_2019) == 0
 
-    test_event_offset = timedelta(hours=12)
-    test_event_duration = timedelta(hours=1)
+    os = gcal_feb_02_2019.span
     gcal_feb_02_2019.add_event(
-        "Test Event 1", offset=test_event_offset, duration=test_event_duration
+        "Test Event 1",
+        when=os.begins_at + timedelta(hours=1),
+        duration=timedelta(hours=2),
     )
 
     assert len(gcal_feb_02_2019) == 1
 
-    os = gcal_feb_02_2019.span
     new_gcal = GoogleCalendarTimeSpan.calendar_by_name(
         "Hermes Test", begins_at=os.begins_at, finish_at=os.finish_at
     )
@@ -103,6 +107,6 @@ def test_create_event(gcal_feb_02_2019):
     assert len(gcal_feb_02_2019) == 1
     assert len(new_gcal) == 0  # Still no flush
 
-    new_gcal.flish()
+    new_gcal.flush()
 
     assert len(new_gcal) == 1

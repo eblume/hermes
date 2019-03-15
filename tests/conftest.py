@@ -22,7 +22,9 @@ def complex_timespan_tags():
     #  Tag C  |    |    |####|####|####|####|    |    |    |
     #  Tag D  |    |    |    |    |    |####|####|####|####|
 
-    t0h = dt.datetime(2018, 4, 16, 6, 43, 15, 13)  # when doesn't matter
+    t0h = dt.datetime(2018, 4, 16, 6, 43, 15, 13).astimezone(
+        dt.timezone.utc
+    )  # when doesn't matter
     t05 = t0h + dt.timedelta(hours=0, minutes=30)
     t1h = t0h + dt.timedelta(hours=1)
     # t15 = t0h + dt.timedelta(hours=1, minutes=30)

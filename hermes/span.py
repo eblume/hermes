@@ -15,10 +15,18 @@ class Spannable(metaclass=abc.ABCMeta):
 
     def __contains__(self, other: "Spannable") -> bool:
         """`other` overlaps at least in part with this object"""
-        self_begins = self.span.begins_at or dt.datetime.min
-        other_begins = other.span.begins_at or dt.datetime.min
-        self_finish = self.span.finish_at or dt.datetime.max
-        other_finish = other.span.finish_at or dt.datetime.max
+        self_begins = self.span.begins_at or dt.datetime.min.replace(
+            tzinfo=dt.timezone.utc
+        )
+        other_begins = other.span.begins_at or dt.datetime.min.replace(
+            tzinfo=dt.timezone.utc
+        )
+        self_finish = self.span.finish_at or dt.datetime.max.replace(
+            tzinfo=dt.timezone.utc
+        )
+        other_finish = other.span.finish_at or dt.datetime.max.replace(
+            tzinfo=dt.timezone.utc
+        )
 
         if other_begins < self_begins:
             return other_finish >= self_begins
