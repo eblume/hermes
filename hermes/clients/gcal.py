@@ -3,7 +3,7 @@ import datetime as dt
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Union
+from typing import Any, Dict, Iterable, Optional, Type, TypeVar, Union
 
 from appdirs import user_data_dir
 
@@ -95,7 +95,7 @@ class GoogleCalendarClient(GoogleServiceClient):
             Category
         ] = base_category or self.DEFAULT_BASE_CATEGORY
 
-    def calendars(self) -> Iterable[str]:
+    def calendars(self) -> Iterable[Dict[str, Any]]:
         page_token = None
         while True:
             calendar_list = (
@@ -110,7 +110,7 @@ class GoogleCalendarClient(GoogleServiceClient):
         # Note that the info returned by calendars() is slightly disjoint.
         return self.service.calendars().get(calendarId=calendar_id).execute()
 
-    def load_gcal(self, calendar_id: str = "primary") -> SqliteTimeSpan:
+    def load_gcal(self, calendar_id: Optional[str] = None) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
         THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
@@ -128,7 +128,13 @@ class GoogleCalendarClient(GoogleServiceClient):
         '/home/erich/.local/share/HermesCLI'
         '/Users/erich/Library/Application Support/HermesCLI'
         """
-        return SqliteTimeSpan(set(self._tag_events_from_service(calendar_id)))
+        return SqliteTimeSpan(
+            set(
+                self._tag_events_from_service(
+                    calendar_id or self.calendar_id or "primary"
+                )
+            )
+        )
 
     def _tag_events_from_service(self, calendar_id: str) -> Iterable["Tag"]:
         calendar = self.calendar(calendar_id)
@@ -201,6 +207,9 @@ class GoogleCalendarClient(GoogleServiceClient):
                 break
 
 
+T = TypeVar("T", bound="GoogleCalendarTimeSpan")
+
+
 class GoogleCalendarTimeSpan(BaseTimeSpan):
     "Convenience wrapper that bridges from the GoogleCalendarClient to a TimeSpan."
 
@@ -221,6 +230,25 @@ class GoogleCalendarTimeSpan(BaseTimeSpan):
             self._cached_timespan = SqliteTimeSpan()
 
         self.client = GoogleCalendarClient()
+
+    @classmethod
+    def calendar_by_name(
+        cls: Type[T], calendar_name: str, ignore_case: bool = True
+    ) -> T:
+        calendar_id: Optional[str] = None
+        search_cal = calendar_name.lower() if ignore_case else calendar_name
+        client = GoogleCalendarClient()
+        for calendar in client.calendars():
+            title = calendar.get("summary", "")
+            if ignore_case:
+                title = title.lower()
+            if title.startswith(search_cal):
+                calendar_id = calendar.get("id")
+
+        if calendar_id is None:
+            raise KeyError("Calendar not found")
+
+        return cls(calendar_id=calendar_id)
 
     @property
     def span(self) -> Span:
