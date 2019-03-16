@@ -274,6 +274,12 @@ def test_sqlite_backend(complex_timespan, sqlite_timespan):
     assert sqlite_tags == base_tags
 
 
+def test_sqlite_reslice(sqlite_timespan):
+    span = sqlite_timespan.span
+    newsqlite = sqlite_timespan[span.begins_at : span.finish_at]
+    assert len(newsqlite) == len(sqlite_timespan)
+
+
 def test_insertable_removable(sqlite_timespan):
     # sqlite is both insertable and removable so we'll use it
     a_tag = next(sqlite_timespan.iter_tags())

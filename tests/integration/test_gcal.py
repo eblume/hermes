@@ -88,25 +88,32 @@ def test_create_event(gcal_feb_02_2019):
     assert len(gcal_feb_02_2019) == 0
 
     os = gcal_feb_02_2019.span
-    gcal_feb_02_2019.add_event(
+    event = gcal_feb_02_2019.add_event(
         "Test Event 1",
         when=os.begins_at + timedelta(hours=1),
         duration=timedelta(hours=2),
     )
-
     assert len(gcal_feb_02_2019) == 1
 
     new_gcal = GoogleCalendarTimeSpan.calendar_by_name(
         "Hermes Test", begins_at=os.begins_at, finish_at=os.finish_at
     )
-
     assert len(new_gcal) == 0  # no flush yet
 
     gcal_feb_02_2019.flush()
-
     assert len(gcal_feb_02_2019) == 1
     assert len(new_gcal) == 0  # Still no flush
 
     new_gcal.flush()
-
     assert len(new_gcal) == 1
+
+    # and then clean up
+    new_gcal.remove_events(
+        "Test Event 1", after=event.valid_from, before=event.valid_to
+    )
+    assert len(new_gcal) == 0
+    assert len(gcal_feb_02_2019) == 1
+
+    new_gcal.flush()
+    gcal_feb_02_2019.flush()
+    assert len(gcal_feb_02_2019) == 0

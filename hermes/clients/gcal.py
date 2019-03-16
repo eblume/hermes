@@ -139,6 +139,33 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
             self.service.events().insert(calendarId=calendar_id, body=event).execute()
         )
 
+    def remove_events(self, tag: Tag, calendar_id: str) -> None:
+        if tag.valid_from is None or tag.valid_to is None:
+            raise ValueError("Events must have concrete start and end times")
+        start: str = tag.valid_from.isoformat()
+        end: str = tag.valid_to.isoformat()
+        page_token: Optional[str] = None
+        while True:
+            events = (
+                self.service.events()
+                .list(
+                    calendarId=calendar_id,
+                    pageToken=page_token,
+                    timeMax=end,
+                    timeMin=start,
+                    timeZone=tag.valid_from.tzname(),
+                )
+                .execute()
+            )
+            page_token = events.get("nextPageToken")
+            for event in events["items"]:
+                self.service.events().delete(
+                    calendarId=calendar_id, eventId=event["id"]
+                ).execute()
+                # TODO - check success?
+            if page_token is None:
+                break
+
     def load_gcal(self, calendar_id: Optional[str] = None) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
@@ -307,25 +334,16 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     def insert_tag(self, tag: Tag) -> None:
         self._cached_timespan.insert_tag(tag)  # TODO - support rollbacks?
-
-        try:  # First remove the inverse operation if it exists
-            self.dirty_queue.remove((False, tag))
-        except ValueError:
-            pass  # This just means it wasn't found
         self.dirty_queue.append((True, tag))
 
     def remove_tag(self, tag: Tag) -> bool:
         success = self._cached_timespan.remove_tag(tag)  # TODO - support rollbacks?
-
-        try:  # First remove the inverse operation if it exists
-            self.dirty_queue.remove((True, tag))
-        except ValueError:
-            pass  # This just means it wasn't found
         self.dirty_queue.append((False, tag))
-
         return success
 
-    def add_event(self, event_name: str, when: dt.datetime, duration: dt.timedelta):
+    def add_event(
+        self, event_name: str, when: dt.datetime, duration: dt.timedelta
+    ) -> Tag:
         start = when.astimezone(dt.timezone.utc)
         tag = Tag(
             name=event_name,
@@ -334,9 +352,18 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             valid_to=start + duration,
         )
         self.insert_tag(tag)
+        return tag
 
-    def remove_event(self, event_name: str):
-        raise NotImplementedError("Not done yet - kinda complicated")
+    def remove_events(
+        self,
+        event_name: str,
+        before: Optional[dt.datetime] = None,
+        after: Optional[dt.datetime] = None,
+    ) -> None:
+        window = self._cached_timespan[before:after]  # type: ignore
+        for tag in window.iter_tags():
+            if tag.name == event_name:
+                self.remove_tag(tag)
 
     def flush(self):
         """Write all pending changes to Google Calendar, and then re-sync."""
@@ -346,6 +373,6 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
                 # TODO - grab event id? not sure how to use it...
                 self.client.create_event(tag=event, calendar_id=self.calendar_id)
             else:
-                raise NotImplementedError("Not done yet - kinda complicated")
+                self.client.remove_events(tag=event, calendar_id=self.calendar_id)
         self.dirty_queue.clear()
         self._cached_timespan = self.client.load_gcal(self.calendar_id)
