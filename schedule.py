@@ -52,7 +52,12 @@ daily_schedule = DailySchedule()
 tasks = daily_schedule.populate(today)
 calendar = GoogleCalendarTimeSpan.calendar_by_name("Hermes Test")
 
+# Clean out any existing schedule
+calendar.remove_events(begins_at=start, finish_at=stop)
+
 for task in tasks:
     calendar.insert_tag(task)
+
+print("Schedule generation completed, syncing to gcal...")
 
 calendar.flush()

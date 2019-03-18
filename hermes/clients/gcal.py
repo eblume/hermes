@@ -356,13 +356,13 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     def remove_events(
         self,
-        event_name: str,
-        before: Optional[dt.datetime] = None,
-        after: Optional[dt.datetime] = None,
+        event_name: Optional[str] = None,
+        begins_at: Optional[dt.datetime] = None,
+        finish_at: Optional[dt.datetime] = None,
     ) -> None:
-        window = self._cached_timespan[before:after]  # type: ignore
+        window = self._cached_timespan[begins_at:finish_at]  # type: ignore
         for tag in window.iter_tags():
-            if tag.name == event_name:
+            if event_name is None or tag.name == event_name:
                 self.remove_tag(tag)
 
     def flush(self):

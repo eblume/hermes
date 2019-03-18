@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime, time, timedelta, timezone
-from typing import List, Optional, Tuple
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Iterable, List, Optional, Tuple
 
 from ortools.sat.python import cp_model
 
@@ -26,14 +26,11 @@ class Schedule:
         self.tasks: List["Task"] = []
         self.model = cp_model.CpModel()
 
-    def task(
-        self,
-        task: "Task",
-        between: Optional[Tuple[Optional[time], Optional[time]]] = None,
-    ):
+    def task(self, task: "Task", between: Optional[Tuple[time, time]] = None):
         self.tasks.append(task)
 
-        # TODO between
+        if between is not None:
+            task.between = between
 
     def populate(self, span: Span) -> List[Tag]:
         if span.begins_at is None or span.finish_at is None:
@@ -67,6 +64,29 @@ class Schedule:
         # No time overlapping
         self.model.AddNoOverlap(intervals)
 
+        # Additional constraints
+        for task, start_time, stop_time in zip(self.tasks, start_times, stop_times):
+            # between intervals
+            if task.between is not None:
+                days = []
+                daily_start = task.between[0]
+                daily_stop = task.between[1]
+                for i, day in enumerate(days_between(span)):
+                    start = int(datetime.combine(day, daily_start).timestamp())
+                    stop = int(datetime.combine(day, daily_stop).timestamp())
+                    start_cons = start_time > start
+                    stop_cons = stop_time < stop
+                    this_day = self.model.NewBoolVar(f"day_{i}_between_{task.name}")
+                    self.model.Add(start_cons).OnlyEnforceIf(this_day)
+                    self.model.Add(stop_cons).OnlyEnforceIf(this_day)
+                    days.append(this_day)
+
+                if not days:
+                    # Should never happen. If it does... debug. TODO: unit test?
+                    raise ValueError(f"Somehow there are no days in {span}... wut?")
+
+                self.model.AddBoolXOr(days)
+
         # And, now for the magic!
         solver = cp_model.CpSolver()
         status = solver.Solve(self.model)
@@ -92,3 +112,22 @@ class Task:
     def __init__(self, name: str, duration: timedelta = timedelta(minutes=30)):
         self.name = name
         self.duration = duration
+        self.between: Optional[Tuple[time, time]] = None
+
+
+def days_between(span: Span) -> Iterable[date]:
+    if span.begins_at is None or span.finish_at is None:
+        raise ValueError("Span must be concrete and finite")
+    begins_at: datetime = span.begins_at
+    finish_at: datetime = span.finish_at
+
+    if begins_at.tzinfo != finish_at.tzinfo:
+        finish_at = finish_at.astimezone(tz=begins_at.tzinfo)
+
+    day: date = begins_at.date()
+    while (
+        datetime.combine(day, time(hour=0, minute=0, second=0, microsecond=0))
+        < finish_at
+    ):
+        yield day
+        day += timedelta(days=1)
