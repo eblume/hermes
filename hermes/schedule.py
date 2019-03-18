@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from ortools.sat.python import cp_model
 
@@ -23,14 +23,34 @@ class Schedule:
     """
 
     def __init__(self):
-        self.tasks: List["Task"] = []
+        self.tasks: Dict[str, "Task"] = {}
         self.model = cp_model.CpModel()
 
-    def task(self, task: "Task", between: Optional[Tuple[time, time]] = None):
-        self.tasks.append(task)
+    def task(
+        self,
+        task: "Task",
+        between: Optional[Tuple[time, time]] = None,
+        after: Optional["Task"] = None,
+        by: Optional[time] = None,
+    ):
+        if task.name in self.tasks:
+            raise ValueError("Task names must be unique")
+        self.tasks[task.name] = task
 
         if between is not None:
             task.between = between
+
+        if by is not None:
+            if between is not None:
+                raise ValueError("Cannot specify both `by` and `between`")
+            task.by = by
+
+        if after is not None:
+            task.after.append(after)
+
+    def not_within(self, task_a: "Task", task_b: "Task", bound: timedelta) -> None:
+        """task_a and task_b must both not start or stop within `bound` of eachother."""
+        task_a.not_within.append((task_b, bound))
 
     def populate(self, span: Span) -> List[Tag]:
         if span.begins_at is None or span.finish_at is None:
@@ -42,7 +62,7 @@ class Schedule:
                 int((span.finish_at - task.duration).timestamp()),  # lower_bound
                 task.name,
             )
-            for task in self.tasks
+            for task in self.tasks.values()
         ]
 
         stop_times = [
@@ -51,21 +71,33 @@ class Schedule:
                 int(span.finish_at.timestamp()),  # lower_bound
                 task.name,
             )
-            for task in self.tasks
+            for task in self.tasks.values()
         ]
 
         intervals = [
             self.model.NewIntervalVar(
                 start_time, int(task.duration.total_seconds()), stop_time, task.name
             )
-            for task, start_time, stop_time in zip(self.tasks, start_times, stop_times)
+            for task, start_time, stop_time in zip(
+                self.tasks.values(), start_times, stop_times
+            )
         ]
+
+        # Helper data structure for the above
+        tasks_to_times = {
+            otask.name: (start_time, stop_time)
+            for otask, start_time, stop_time in zip(
+                self.tasks.values(), start_times, stop_times
+            )
+        }
 
         # No time overlapping
         self.model.AddNoOverlap(intervals)
 
         # Additional constraints
-        for task, start_time, stop_time in zip(self.tasks, start_times, stop_times):
+        for task, start_time, stop_time in zip(
+            self.tasks.values(), start_times, stop_times
+        ):
             # between intervals
             if task.between is not None:
                 days = []
@@ -80,12 +112,43 @@ class Schedule:
                     self.model.Add(start_cons).OnlyEnforceIf(this_day)
                     self.model.Add(stop_cons).OnlyEnforceIf(this_day)
                     days.append(this_day)
-
-                if not days:
-                    # Should never happen. If it does... debug. TODO: unit test?
-                    raise ValueError(f"Somehow there are no days in {span}... wut?")
-
                 self.model.AddBoolXOr(days)
+
+            # by constraint
+            if task.by:
+                days = []
+                for i, day in enumerate(days_between(span)):
+                    by_time = int(datetime.combine(day, task.by).timestamp())
+                    this_day = self.model.NewBoolVar(f"day_{i}_by_{task.name}")
+                    self.model.Add(stop_time < by_time).OnlyEnforceIf(this_day)
+                    days.append(this_day)
+                self.model.AddBoolXOr(days)
+
+            # after constraint
+            if task.after:
+                for other_task in task.after:
+                    other_start, other_stop = tasks_to_times[other_task.name]
+                    self.model.Add(start_time > other_stop)
+
+            # not-within bounds
+            if task.not_within:
+                for other_task, bound in task.not_within:
+                    other_start, other_stop = tasks_to_times[other_task.name]
+                    gap = int(bound.total_seconds())
+                    smallest_stop = self.model.NewIntVar(
+                        int(span.begins_at.timestamp()),
+                        int(span.finish_at.timestamp()),
+                        f"smallest_stop_{task.name}_{other_task.name}",
+                    )
+                    largest_start = self.model.NewIntVar(
+                        int(span.begins_at.timestamp()),
+                        int(span.finish_at.timestamp()),
+                        f"largest_start_{task.name}_{other_task.name}",
+                    )
+                    self.model.AddMinEquality(smallest_stop, [stop_time, other_stop])
+                    self.model.AddMaxEquality(largest_start, [start_time, other_start])
+
+                    self.model.Add(largest_start - smallest_stop > gap)
 
         # And, now for the magic!
         solver = cp_model.CpSolver()
@@ -104,7 +167,9 @@ class Schedule:
                 ),
                 valid_to=datetime.fromtimestamp(solver.Value(stop_time), timezone.utc),
             )
-            for task, start_time, stop_time in zip(self.tasks, start_times, stop_times)
+            for task, start_time, stop_time in zip(
+                self.tasks.values(), start_times, stop_times
+            )
         ]
 
 
@@ -113,6 +178,9 @@ class Task:
         self.name = name
         self.duration = duration
         self.between: Optional[Tuple[time, time]] = None
+        self.by: Optional[time] = None
+        self.not_within: List[Tuple["Task", timedelta]] = []
+        self.after: List["Task"] = []
 
 
 def days_between(span: Span) -> Iterable[date]:
@@ -126,7 +194,11 @@ def days_between(span: Span) -> Iterable[date]:
 
     day: date = begins_at.date()
     while (
-        datetime.combine(day, time(hour=0, minute=0, second=0, microsecond=0))
+        datetime.combine(
+            day,
+            time(hour=0, minute=0, second=0, microsecond=0),
+            tzinfo=begins_at.tzinfo,
+        )
         < finish_at
     ):
         yield day

@@ -10,6 +10,7 @@ import apsw
 import attr
 
 from dateutil.parser import parse as date_parse_base
+from dateutil.tz import tzutc
 
 from .categorypool import BaseCategoryPool, CategoryPool, MutableCategoryPool
 from .span import Span, Spannable
@@ -195,10 +196,12 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
             conn.execute(
                 "INSERT INTO tags VALUES (:valid_from, :valid_to, :name, :category)",
                 {
-                    "valid_from": tag.valid_from.isoformat()
+                    "valid_from": tag.valid_from.astimezone(tzutc()).isoformat()
                     if tag.valid_from
                     else None,
-                    "valid_to": tag.valid_to.isoformat() if tag.valid_to else None,
+                    "valid_to": tag.valid_to.astimezone(tzutc()).isoformat()
+                    if tag.valid_to
+                    else None,
                     "name": tag.name,
                     "category": category.fullpath,
                 },
@@ -210,10 +213,10 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
             conn.execute(
                 "DELETE FROM tags WHERE valid_from = :valid_from AND valid_to = :valid_to AND name = :name",
                 {
-                    "valid_from": tag.valid_from.isoformat()
+                    "valid_from": tag.valid_from.astimezone(tzutc()).isoformat()
                     if tag.valid_from is not None
                     else None,
-                    "valid_to": tag.valid_to.isoformat()
+                    "valid_to": tag.valid_to.astimezone(tzutc()).isoformat()
                     if tag.valid_to is not None
                     else None,
                     "name": tag.name,
@@ -274,10 +277,10 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
             result = conn.execute(
                 query,
                 {
-                    "begins_at": begins_at.isoformat()
+                    "begins_at": begins_at.astimezone(tzutc()).isoformat()
                     if begins_at is not None
                     else None,
-                    "finish_at": finish_at.isoformat()
+                    "finish_at": finish_at.astimezone(tzutc()).isoformat()
                     if finish_at is not None
                     else None,
                 },
@@ -311,10 +314,10 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
             result = conn.execute(
                 query,
                 {
-                    "valid_to": tag.valid_to.isoformat()
+                    "valid_to": tag.valid_to.astimezone(tzutc()).isoformat()
                     if tag.valid_to is not None
                     else None,
-                    "valid_from": tag.valid_from.isoformat()
+                    "valid_from": tag.valid_from.astimezone(tzutc()).isoformat()
                     if tag.valid_from is not None
                     else None,
                     "category": tag.category.fullpath if tag.category else None,
@@ -329,8 +332,12 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
     def _tag_from_row(self, row: Any) -> Tag:
         category = self._category_pool.get_category(row[3])
         return Tag(
-            valid_from=None if row[0] is None else date_parse(row[0]),
-            valid_to=None if row[1] is None else date_parse(row[1]),
+            valid_from=None
+            if row[0] is None
+            else dt.datetime.fromisoformat(row[0]).replace(tzinfo=tzutc()),
+            valid_to=None
+            if row[1] is None
+            else dt.datetime.fromisoformat(row[1]).replace(tzinfo=tzutc()),
             name=row[2],
             category=category,
         )
