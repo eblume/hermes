@@ -4,7 +4,19 @@ import re
 import warnings
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable, Deque, Dict, Iterable, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Deque,
+    Dict,
+    Iterable,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 from appdirs import user_data_dir
 
@@ -125,7 +137,7 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         return self.service.calendars().get(calendarId=calendar_id).execute()
 
     def calendar_by_name(self, calendar: str) -> Optional[Dict[str, Any]]:
-        calendars = {c['summary']: c for c in self.calendars()}
+        calendars = {c["summary"]: c for c in self.calendars()}
         return calendars.get(calendar, None)
 
     def create_event(self, tag: Tag, calendar_id: str) -> Dict[str, Any]:
@@ -170,7 +182,13 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
             if page_token is None:
                 break
 
-    def load_gcal(self, calendar_id: Optional[str] = None, progress: Optional[Callable[..., Iterable[Dict[str, Any]]]] = None) -> SqliteTimeSpan:
+    def load_gcal(
+        self,
+        calendar_id: Optional[str] = None,
+        progress: Optional[
+            Callable[..., ContextManager[Iterable[Dict[str, Any]]]]
+        ] = None,
+    ) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
         If `progress` is specified, it will wrap the download process, to (eg)
@@ -192,10 +210,20 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         '/Users/erich/Library/Application Support/HermesCLI'
         """
         return SqliteTimeSpan(
-            set(self._tag_events_from_service(calendar_id or "primary", progress=progress))
+            set(
+                self._tag_events_from_service(
+                    calendar_id or "primary", progress=progress
+                )
+            )
         )
 
-    def _tag_events_from_service(self, calendar_id: str, progress: Optional[Callable[..., Iterable[Dict[str, Any]]]] = None) -> Iterable["Tag"]:
+    def _tag_events_from_service(
+        self,
+        calendar_id: str,
+        progress: Optional[
+            Callable[..., ContextManager[Iterable[Dict[str, Any]]]]
+        ] = None,
+    ) -> Iterable["Tag"]:
         calendar = self.calendar(calendar_id)
         title = calendar.get("summary", f"Imported GCal")
         title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
@@ -216,16 +244,22 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
                 with progress(events) as bar:
                     for event in bar:
                         if last_event is not None:
-                            bar.update((event['valid_from'] - last_event['valid_from']).total_seconds())
+                            bar.update(
+                                (
+                                    event["valid_from"] - last_event["valid_from"]
+                                ).total_seconds()
+                            )
                         yield event
                         last_event = event
 
-        for event in _wrap_for_progress(self._retrieve_events_from_calendar(calendar_id)):
+        for event in _wrap_for_progress(
+            self._retrieve_events_from_calendar(calendar_id)
+        ):
             yield Tag(
                 name=event.get("summary", event.get("id")),
                 category=category,
-                valid_from=event['valid_from'],
-                valid_to=event['valid_to'],
+                valid_from=event["valid_from"],
+                valid_to=event["valid_to"],
             )
 
     def _retrieve_events_from_calendar(self, calendar_id: str):
@@ -264,13 +298,15 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
                 # Hide some goodies to avoid doing this multiple times
                 start = event.get("start")
                 end = event.get("end")
-                event['valid_from'] = (
+                event["valid_from"] = (
                     date_parse(start.get("dateTime", start.get("date", None)))
                     if start
                     else None
                 )
-                event['valid_to'] = (
-                    date_parse(end.get("dateTime", end.get("date", None))) if end else None
+                event["valid_to"] = (
+                    date_parse(end.get("dateTime", end.get("date", None)))
+                    if end
+                    else None
                 )
                 yield event
 
