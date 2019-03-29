@@ -17,7 +17,7 @@ from .span import Span, Spannable
 from .tag import Category, Tag
 
 
-def date_parse(datestring: str):
+def date_parse(datestring: str) -> dt.datetime:
     """Parse a date string, and also set the timezone to UTC. Reads TZ info
     from input string, if present, or else assumes local time."""
     return date_parse_base(datestring).astimezone(dt.timezone.utc)
@@ -46,7 +46,7 @@ class BaseTimeSpan(Spannable, metaclass=abc.ABCMeta):
     def has_tag(self, tag: Tag) -> bool:
         return tag in set(self.iter_tags())
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(list(self.iter_tags()))
 
     def __getitem__(self, key: Union[Optional[int], slice]) -> "BaseTimeSpan":
@@ -187,6 +187,11 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
             if tags:
                 for tag in tags:
                     self.insert_tag(tag)
+
+    def __len__(self) -> int:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            return list(conn.execute("SELECT COUNT(*) FROM tags"))[0][0]
 
     def insert_tag(self, tag: Tag) -> None:
         with self._sqlite_db:

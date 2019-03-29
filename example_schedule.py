@@ -62,7 +62,7 @@ class DailySchedule(Schedule):
         self.task(clothes, after=dinner, by=time(hour=22))
 
 
-start = datetime.now().replace(
+start = (datetime.now() + timedelta(hours=2)).replace(
     hour=8, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
 )
 stop = start.replace(hour=23)

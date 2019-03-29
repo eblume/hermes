@@ -4,7 +4,7 @@ import re
 import warnings
 from collections import deque
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Callable, Deque, Dict, Iterable, Optional, Tuple, Type, TypeVar, Union
 
 from appdirs import user_data_dir
 
@@ -124,6 +124,10 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         # Note that the info returned by calendars() is slightly disjoint.
         return self.service.calendars().get(calendarId=calendar_id).execute()
 
+    def calendar_by_name(self, calendar: str) -> Optional[Dict[str, Any]]:
+        calendars = {c['summary']: c for c in self.calendars()}
+        return calendars.get(calendar, None)
+
     def create_event(self, tag: Tag, calendar_id: str) -> Dict[str, Any]:
         if tag.valid_from is None or tag.valid_to is None:
             raise ValueError("Events must have concrete start and end times")
@@ -166,8 +170,11 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
             if page_token is None:
                 break
 
-    def load_gcal(self, calendar_id: Optional[str] = None) -> SqliteTimeSpan:
+    def load_gcal(self, calendar_id: Optional[str] = None, progress: Optional[Callable[..., Iterable[Dict[str, Any]]]] = None) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
+
+        If `progress` is specified, it will wrap the download process, to (eg)
+        allow for a progress bar to be displayed.
 
         THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
         on your system, in order to sign you in!
@@ -185,10 +192,10 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         '/Users/erich/Library/Application Support/HermesCLI'
         """
         return SqliteTimeSpan(
-            set(self._tag_events_from_service(calendar_id or "primary"))
+            set(self._tag_events_from_service(calendar_id or "primary", progress=progress))
         )
 
-    def _tag_events_from_service(self, calendar_id: str) -> Iterable["Tag"]:
+    def _tag_events_from_service(self, calendar_id: str, progress: Optional[Callable[..., Iterable[Dict[str, Any]]]] = None) -> Iterable["Tag"]:
         calendar = self.calendar(calendar_id)
         title = calendar.get("summary", f"Imported GCal")
         title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
@@ -200,22 +207,25 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         # * missing from calendar_resource: summaryOverride, backgroundColor, defaultReminders, accessRole, foregroundColor, colorId
         # * (none missing in reverse)
         # Conclusion: for at least some calendars, we get nothing useful
-        for event in self._retrieve_events_from_calendar(calendar_id):
-            start = event.get("start")
-            end = event.get("end")
-            valid_from = (
-                date_parse(start.get("dateTime", start.get("date", None)))
-                if start
-                else None
-            )
-            valid_to = (
-                date_parse(end.get("dateTime", end.get("date", None))) if end else None
-            )
+
+        def _wrap_for_progress(events: Iterable[Dict[str, Any]]):
+            if progress is None:
+                yield from events
+            else:
+                last_event = None
+                with progress(events) as bar:
+                    for event in bar:
+                        if last_event is not None:
+                            bar.update((event['valid_from'] - last_event['valid_from']).total_seconds())
+                        yield event
+                        last_event = event
+
+        for event in _wrap_for_progress(self._retrieve_events_from_calendar(calendar_id)):
             yield Tag(
                 name=event.get("summary", event.get("id")),
                 category=category,
-                valid_from=valid_from,
-                valid_to=valid_to,
+                valid_from=event['valid_from'],
+                valid_to=event['valid_to'],
             )
 
     def _retrieve_events_from_calendar(self, calendar_id: str):
@@ -238,6 +248,8 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
                 "calendarId": calendar_id,
                 "timeZone": "Etc/UTC",  # TODO - figure out how to get this to play nice with dateutil
                 "maxResults": 2500,
+                "singleEvents": "true",  # Don't expand recurring events (hermes doesn't use them anyway)
+                "orderBy": "startTime",  # requires singleEvents = True
             }
             # There are tons of other query params to look in to. Also, live syncing!
             if begins_at:
@@ -248,7 +260,19 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
                 query_params["pageToken"] = page_token
 
             events = self.service.events().list(**query_params).execute()
-            yield from events["items"]
+            for event in events["items"]:
+                # Hide some goodies to avoid doing this multiple times
+                start = event.get("start")
+                end = event.get("end")
+                event['valid_from'] = (
+                    date_parse(start.get("dateTime", start.get("date", None)))
+                    if start
+                    else None
+                )
+                event['valid_to'] = (
+                    date_parse(end.get("dateTime", end.get("date", None))) if end else None
+                )
+                yield event
 
             page_token = events.get("nextPageToken", None)
             if page_token is None:
