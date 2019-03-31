@@ -6,9 +6,13 @@
 # It's entirely possible to fix this, but it quickly becomes a lot of lines
 # of code just to get the type system to quiet down...
 
+import configparser
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from appdirs import user_config_dir
 
 import click
 
@@ -16,9 +20,25 @@ from .clients.gcal import GoogleCalendarClient
 from .timespan import date_parse
 
 
+DEFAULT_CONFIG_FILE = Path(user_config_dir()) / "hermes.ini"
+
+DEFAULT_CONFIG = {"hermes": {}}
+
+
 class CallContext:
-    def __init__(self, debug=False):
+    def __init__(self, config: Optional[str] = None, debug: bool = False):
         self.debug = debug
+        parser = configparser.ConfigParser()
+        parser.read_dict(DEFAULT_CONFIG)
+        if config:
+            config_file = Path(config).resolve()
+            if config_file.is_file():
+                parser.read_file(config_file.open())
+            else:
+                raise ValueError("Invalid config file", config)
+        elif DEFAULT_CONFIG_FILE.is_file():
+            parser.read_file(DEFAULT_CONFIG_FILE.open())
+        self.config = parser["hermes"]
 
 
 class GCalOptions:
@@ -39,9 +59,10 @@ pass_call_context = click.make_pass_decorator(CallContext)
 
 @click.group()
 @click.option("--debug/--no-debug", default=False, envvar="HERMES_DEBUG")
+@click.option("--config", default=None, envvar="HERMES_CONFIG")
 @click.pass_context
-def cli(ctx, debug):
-    ctx.obj = CallContext(debug)
+def cli(ctx, debug, config):
+    ctx.obj = CallContext(config=config, debug=debug)
 
 
 @cli.group()
@@ -104,40 +125,21 @@ def events(
     else:
         search_calendars = [calendar_id]
 
+    if not search_calendars:
+        context.fail("No calendars found on your account!")
+
+    load_opts = {}
     if (
         pretty
         and context.gcal.begins_at is not None
         and context.gcal.finish_at is not None
     ):
-
-        def _item_show(event: Optional[Dict[str, Any]]) -> str:
-            if event is None:
-                return "<none>"
-            else:
-                start = event.get("start")
-                start_dt = start.get("dateTime", start.get("date", None))
-                if start_dt is None:
-                    return "<none>"
-                else:
-                    return date_parse(start_dt).isoformat()
-
-        progress_options = {
-            "item_show_func": _item_show,
-            "show_eta": False,
-            "show_pos": True,
-        }
-        span = context.gcal.finish_at - context.gcal.begins_at
-        progress_options["length"] = span.total_seconds()
-
-        progress = partial(click.progressbar, **progress_options)
+        load_opts["progress"] = _make_progress_iter(context)
 
     for cal_id in search_calendars:
         cal_data = context.gcal.client.calendar(cal_id)
         if pretty:
             click.secho(f"{cal_data['summary']} [{cal_id}]", bold=True)
-        load_opts = {}
-        if pretty:
-            load_opts["progress"] = progress
         timespan = context.gcal.client.load_gcal(cal_id, **load_opts)
         if pretty:
             click.secho(f"Found {len(timespan)} events.")
@@ -147,6 +149,28 @@ def events(
             click.echo(
                 f"{indent}{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>{category}"
             )
+
+
+def _make_progress_iter(context):
+    def _item_show(event: Optional[Dict[str, Any]]) -> str:
+        if event is None:
+            return "<none>"
+        else:
+            start = event.get("start")
+            start_dt = start.get("dateTime", start.get("date", None))
+            if start_dt is None:
+                return "<none>"
+            else:
+                return date_parse(start_dt).isoformat()
+
+    progress_options = {
+        "item_show_func": _item_show,
+        "show_eta": False,
+        "show_pos": True,
+    }
+    span = context.gcal.finish_at - context.gcal.begins_at
+    progress_options["length"] = span.total_seconds()
+    return partial(click.progressbar, **progress_options)
 
 
 if __name__ == "__main__":
