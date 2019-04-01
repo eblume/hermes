@@ -20,9 +20,9 @@ from .clients.gcal import GoogleCalendarClient
 from .timespan import date_parse
 
 
-DEFAULT_CONFIG_FILE = Path(user_config_dir()) / "hermes.ini"
+DEFAULT_CONFIG_FILE = Path(user_config_dir()) / "hermes" / "hermes.ini"
 
-DEFAULT_CONFIG = {"hermes": {}}
+DEFAULT_CONFIG = {"hermes": {"gcal calendar": ""}}
 
 
 class CallContext:
@@ -112,21 +112,8 @@ def events(
     pretty: bool = True,
 ) -> None:
     """List all events. Use options to narrow the search. If no calendar is specified, all calendars will be searched."""
-    search_calendars: List[str] = []
-    if calendar is None and calendar_id is None:
-        search_calendars = [cal["id"] for cal in context.gcal.client.calendars()]
-    elif calendar is not None and calendar_id is not None:
-        click.echo(context.get_help())
-        context.fail(
-            "You must specify only one of --calendar and --calendar-id, or neither - not both."
-        )
-    elif calendar is not None:
-        search_calendars = [context.gcal.client.calendar_by_name(calendar)["id"]]
-    else:
-        search_calendars = [calendar_id]
 
-    if not search_calendars:
-        context.fail("No calendars found on your account!")
+    search_calendars = _make_search_cals(context, calendar, calendar_id)
 
     load_opts = {}
     if (
@@ -149,6 +136,34 @@ def events(
             click.echo(
                 f"{indent}{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>{category}"
             )
+
+
+def _make_search_cals(context, calendar, calendar_id) -> List[str]:
+    search_calendars: List[str] = []
+    if calendar is None and calendar_id is None:
+        if context.config.get("gcal calendar"):
+            # Retrieve calendar from config if set in config
+            search_calendars = [
+                context.gcal.client.calendar_by_name(
+                    context.config.get("gcal calendar")
+                )["id"]
+            ]
+        else:
+            search_calendars = [cal["id"] for cal in context.gcal.client.calendars()]
+    elif calendar is not None and calendar_id is not None:
+        click.echo(context.get_help())
+        context.fail(
+            "You must specify only one of --calendar and --calendar-id, or neither - not both."
+        )
+    elif calendar is not None:
+        search_calendars = [context.gcal.client.calendar_by_name(calendar)["id"]]
+    else:
+        search_calendars = [calendar_id]
+
+    if not search_calendars:
+        context.fail("No calendars found on your account!")
+
+    return search_calendars
 
 
 def _make_progress_iter(context):
