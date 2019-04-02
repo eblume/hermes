@@ -4,7 +4,6 @@ from operator import attrgetter
 
 from hermes.clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
 from hermes.timespan import date_parse
-
 import pytest
 
 
@@ -108,9 +107,7 @@ def test_create_event(gcal_feb_02_2019):
     assert len(new_gcal) == 1
 
     # and then clean up
-    new_gcal.remove_events(
-        "Test Event 1", begins_at=event.valid_from, finish_at=event.valid_to
-    )
+    new_gcal.remove_events("Test Event 1", during=event.span)
     assert len(new_gcal) == 0
     assert len(gcal_feb_02_2019) == 1
 
