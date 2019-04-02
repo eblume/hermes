@@ -54,3 +54,6 @@ class Tag(Spannable):
         return Span(
             self.valid_from or dt.datetime.max, self.valid_to or dt.datetime.max
         )
+
+    def recategorize(self, category: Category) -> "Tag":
+        return Tag(self.name, category, self.valid_from, self.valid_to)

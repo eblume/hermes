@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-import datetime as dt
-import re
-import warnings
 from collections import deque
+import datetime as dt
 from pathlib import Path
+import re
 from typing import (
     Any,
     Callable,
@@ -17,12 +16,11 @@ from typing import (
     TypeVar,
     Union,
 )
+import warnings
 
 from appdirs import user_data_dir
-
 from googleapiclient import discovery
 from googleapiclient.http import build_http
-
 from oauth2client import client as oauth2_client, file, tools
 
 from ..categorypool import BaseCategoryPool
@@ -30,10 +28,10 @@ from ..span import Span, Spannable
 from ..tag import Category, Tag
 from ..timespan import (
     BaseTimeSpan,
+    date_parse,
     InsertableTimeSpan,
     RemovableTimeSpan,
     SqliteTimeSpan,
-    date_parse,
 )
 
 
@@ -188,6 +186,7 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         progress: Optional[
             Callable[..., ContextManager[Iterable[Dict[str, Any]]]]
         ] = None,
+        load_events: bool = True,
     ) -> SqliteTimeSpan:
         """Create a TimeSpan from the specified `ouath_config` file.
 
@@ -208,6 +207,10 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
         'C:\\Users\\erich\\AppData\\Local\\Hermes\\HermesCLI'
         '/home/erich/.local/share/HermesCLI'
         '/Users/erich/Library/Application Support/HermesCLI'
+
+        If `load_events` is False, the created timespan will not download
+        any event data. This is useful when you are only inserting events and
+        do not need existing calendar data.
         """
         return SqliteTimeSpan(
             set(
@@ -325,6 +328,7 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
         self,
         client: Optional[GoogleCalendarClient] = None,
         calendar_id: str = "primary",
+        load_events: bool = True,
     ):
         if client is None:
             self.client = GoogleCalendarClient()
@@ -337,7 +341,10 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             "summary", f"Unknown Calendar: {self.calendar_id}"
         )
 
-        self._cached_timespan = self.client.load_gcal(self.calendar_id)
+        if load_events:
+            self._cached_timespan = self.client.load_gcal(self.calendar_id)
+        else:
+            self._cached_timespan = SqliteTimeSpan()
 
         # Item( is_insert, tag ) -- is_insert == False means is delete
         self.dirty_queue: Deque[Tuple[bool, Tag]] = deque()
@@ -415,12 +422,9 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
         return tag
 
     def remove_events(
-        self,
-        event_name: Optional[str] = None,
-        begins_at: Optional[dt.datetime] = None,
-        finish_at: Optional[dt.datetime] = None,
+        self, event_name: Optional[str] = None, during: Optional[Span] = None
     ) -> None:
-        window = self._cached_timespan[begins_at:finish_at]  # type: ignore
+        window = self._cached_timespan.slice_with_span(during or self.client.span)
         for tag in window.iter_tags():
             if event_name is None or tag.name == event_name:
                 self.remove_tag(tag)

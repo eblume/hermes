@@ -3,12 +3,10 @@ import abc
 import datetime as dt
 from operator import attrgetter
 from pathlib import Path
-from typing import Any, Iterable, Optional, Set, Union, cast
+from typing import Any, cast, Iterable, Optional, Set, Union
 
 import apsw
-
 import attr
-
 from dateutil.parser import parse as date_parse_base
 from dateutil.tz import tzutc
 

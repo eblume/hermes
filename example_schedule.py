@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime, time, timedelta
+from datetime import time, timedelta
 
-from dateutil.tz import tzlocal
-
-from hermes.clients.gcal import GoogleCalendarTimeSpan
-from hermes.schedule import Schedule, Task
-from hermes.span import Span
+from hermes.schedule import DailySchedule, Task
 
 
-class DailySchedule(Schedule):
-    def __init__(self):
-        super().__init__()
+class MyDailySchedule(DailySchedule):
+    def schedule(self):
+        # These are the defaults, but I'm including them for documentation
+        self.day_start = time(hour=8)
+        self.day_end = time(hour=22)
 
         # Take medicine
         medicine = Task("Take my medicine", duration=timedelta(minutes=10))
@@ -60,25 +58,3 @@ class DailySchedule(Schedule):
         # Set out clothes for tomorrow by 10pm and after dinner
         clothes = Task("Set out clothes", duration=timedelta(minutes=15))
         self.task(clothes, after=dinner, by=time(hour=22))
-
-
-start = (datetime.now() + timedelta(hours=2)).replace(
-    hour=8, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
-)
-stop = start.replace(hour=23)
-
-today = Span(begins_at=start, finish_at=stop)
-daily_schedule = DailySchedule()
-tasks = daily_schedule.populate(today)
-calendar = GoogleCalendarTimeSpan.calendar_by_name("Hermes Test")
-
-# Clean out any existing schedule
-calendar.remove_events(begins_at=start, finish_at=stop)
-calendar.flush()
-
-for task in tasks:
-    calendar.insert_tag(task)
-
-print("Schedule generation completed, syncing to gcal...")
-
-calendar.flush()

@@ -5,6 +5,7 @@ import functools
 from typing import Iterable, Optional
 
 import attr
+from dateutil.tz import tzlocal
 
 
 class Spannable(metaclass=abc.ABCMeta):
@@ -72,3 +73,17 @@ class Span(Spannable):
             yield Span(start, finish)
 
             start = finish
+
+    def is_finite(self) -> bool:
+        return self.begins_at is not None and self.finish_at is not None
+
+    @classmethod
+    def from_date(cls, date: dt.date, tzinfo: Optional[dt.tzinfo] = None) -> "Span":
+        """Assumes the local timezone, as understood by the OS, unless otherwise specified."""
+        start = dt.datetime.combine(
+            date,
+            dt.time(hour=0, minute=0, second=0, microsecond=0),
+            tzinfo=tzinfo or tzlocal(),
+        )
+        stop = start + dt.timedelta(days=1, microseconds=-1)
+        return cls(begins_at=start, finish_at=stop)

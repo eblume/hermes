@@ -7,16 +7,21 @@
 # of code just to get the type system to quiet down...
 
 import configparser
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
+from importlib.util import module_from_spec, spec_from_file_location
+import inspect
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from appdirs import user_config_dir
-
 import click
+from dateutil.tz import tzlocal
 
-from .clients.gcal import GoogleCalendarClient
+from .clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
+from .schedule import dates_between, Schedule
+from .span import Span
+from .tag import Category
 from .timespan import date_parse
 
 
@@ -42,13 +47,9 @@ class CallContext:
 
 
 class GCalOptions:
-    def __init__(self, begins_at: Optional[str], finish_at: Optional[str]):
-        self.begins_at: Optional[datetime] = date_parse(
-            begins_at
-        ) if begins_at else None
-        self.finish_at: Optional[datetime] = date_parse(
-            finish_at
-        ) if finish_at else None
+    def __init__(self, begins_at: Optional[datetime], finish_at: Optional[datetime]):
+        self.begins_at = begins_at
+        self.finish_at = finish_at
         self.client = GoogleCalendarClient(
             begins_at=self.begins_at, finish_at=self.finish_at
         )
@@ -59,10 +60,14 @@ pass_call_context = click.make_pass_decorator(CallContext)
 
 @click.group()
 @click.option("--debug/--no-debug", default=False, envvar="HERMES_DEBUG")
-@click.option("--config", default=None, envvar="HERMES_CONFIG")
+@click.option(
+    "--config", default=None, type=click.Path(exists=True), envvar="HERMES_CONFIG"
+)
 @click.pass_context
 def cli(ctx, debug, config):
-    ctx.obj = CallContext(config=config, debug=debug)
+    ctx.obj = CallContext(
+        config=None if config is None else click.format_filename(config), debug=debug
+    )
 
 
 @cli.group()
@@ -76,14 +81,45 @@ def cli(ctx, debug, config):
     default=None,
     help='For clients that support it, specify this finish date. Example: "March 2nd 2019 8PM PST"',
 )
+@click.option(
+    "--today",
+    is_flag=True,
+    help="Shortcut for --start-date and --finish-date to match the current local day.",
+)
+@click.option(
+    "--tomorrow",
+    is_flag=True,
+    help='Shortcut for --start-date and --finish-date to match the current local "tomorrow".',
+)
 @pass_call_context
 def calendars(
     context: CallContext,
     start_date: Optional[str] = None,
     finish_date: Optional[str] = None,
+    today: bool = False,
+    tomorrow: bool = False,
 ) -> None:
     """Query and manipulate calendars"""
-    context.gcal = GCalOptions(begins_at=start_date, finish_at=finish_date)
+    if today:
+        if tomorrow or start_date or finish_date:
+            context.Fail("You must not specify multiple calendar spans.")
+        start = datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
+        )
+        stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
+        context.gcal = GCalOptions(begins_at=start, finish_at=stop)
+    elif tomorrow:
+        if today or start_date or finish_date:
+            context.Fail("You must not specify multiple calendar spans.")
+        start = datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
+        ) + timedelta(days=1)
+        stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
+        context.gcal = GCalOptions(begins_at=start, finish_at=stop)
+    else:
+        begins_at: Optional[datetime] = date_parse(start_date) if start_date else None
+        finish_at: Optional[datetime] = date_parse(finish_date) if finish_date else None
+        context.gcal = GCalOptions(begins_at=begins_at, finish_at=finish_at)
 
 
 @calendars.command()
@@ -116,11 +152,7 @@ def events(
     search_calendars = _make_search_cals(context, calendar, calendar_id)
 
     load_opts = {}
-    if (
-        pretty
-        and context.gcal.begins_at is not None
-        and context.gcal.finish_at is not None
-    ):
+    if pretty and context.gcal.client.span.is_finite():
         load_opts["progress"] = _make_progress_iter(context)
 
     for cal_id in search_calendars:
@@ -138,6 +170,86 @@ def events(
             )
 
 
+@calendars.command()
+@click.option("--calendar", default=None, help="Name of the calendar to use.")
+@click.option("--calendar-id", default=None, help="ID of the calendar to use.")
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Do not prompt to confirm, just delete the events. (I like to live dangerously.)",
+)
+@pass_call_context
+def clear(context, calendar, calendar_id, yes):
+    calendars = _make_search_cals(context, calendar, calendar_id)
+    if len(calendars) != 1:
+        raise click.UsageError(
+            "When clearing a schedule, you must specify one (and only one) calendar."
+        )
+    target_calendar_id = calendars[0]
+
+    gcal = GoogleCalendarTimeSpan(
+        client=context.gcal.client, calendar_id=target_calendar_id
+    )
+    click.echo("Events:")
+    for event in gcal.iter_tags():
+        click.echo(
+            f"\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}> ({event.category.fullpath}"
+        )
+
+    if not yes:
+        click.confirm(
+            "Do you want to delete these events? (CANNOT BE UNDONE!)", abort=True
+        )
+
+    gcal.remove_events()
+    gcal.flush()
+
+
+@calendars.command()
+@click.option("--calendar", default=None, help="Name of the calendar to use.")
+@click.option("--calendar-id", default=None, help="ID of the calendar to use.")
+@click.argument("schedules", type=click.Path(exists=True), nargs=-1)
+@pass_call_context
+def schedule(context, calendar=None, calendar_id=None, schedules=None):
+    """Import the specified schedule files (which are python files) and populate
+    the specified calendar according to schedule definitions in those files."""
+
+    if not schedules:
+        raise click.UsageError("You must specify at least one schedule file.")
+
+    calendars = _make_search_cals(context, calendar, calendar_id)
+    if len(calendars) != 1:
+        raise click.UsageError(
+            "When scheduling, you must specify one (and only one) calendar."
+        )
+    target_calendar_id = calendars[0]
+
+    if not context.gcal.client.span.is_finite():
+        raise click.UsageError(
+            "You must specify both a start and finish time when scheduling. (You can't plan eternity... yet.)"
+        )
+    gcal = GoogleCalendarTimeSpan(
+        client=context.gcal.client, calendar_id=target_calendar_id, load_events=False
+    )
+    base_category = Category("Hermes", None) / "Daily Schedule"
+
+    for schedule_name, schedule_def in _load_schedules(schedules):
+        click.echo(f"Scheduling with {schedule_name}")
+        category = base_category / (schedule_def.NAME or schedule_name)
+        for day in dates_between(
+            Span(begins_at=context.gcal.begins_at, finish_at=context.gcal.finish_at)
+        ):
+            click.echo(f"\ton {day.isoformat()}")
+            schedule = schedule_def()
+            schedule.schedule()
+            for event in schedule.populate(Span.from_date(day)):
+                click.echo(
+                    f"\t\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
+                )
+                gcal.insert_tag(event.recategorize(category))
+    gcal.flush()
+
+
 def _make_search_cals(context, calendar, calendar_id) -> List[str]:
     search_calendars: List[str] = []
     if calendar is None and calendar_id is None:
@@ -152,7 +264,7 @@ def _make_search_cals(context, calendar, calendar_id) -> List[str]:
             search_calendars = [cal["id"] for cal in context.gcal.client.calendars()]
     elif calendar is not None and calendar_id is not None:
         click.echo(context.get_help())
-        context.fail(
+        raise click.UsageError(
             "You must specify only one of --calendar and --calendar-id, or neither - not both."
         )
     elif calendar is not None:
@@ -161,7 +273,7 @@ def _make_search_cals(context, calendar, calendar_id) -> List[str]:
         search_calendars = [calendar_id]
 
     if not search_calendars:
-        context.fail("No calendars found on your account!")
+        raise click.UsageError("No matching calendars found on your account!")
 
     return search_calendars
 
@@ -183,9 +295,19 @@ def _make_progress_iter(context):
         "show_eta": False,
         "show_pos": True,
     }
-    span = context.gcal.finish_at - context.gcal.begins_at
-    progress_options["length"] = span.total_seconds()
+    progress_options["length"] = context.gcal.client.span.total_seconds()
     return partial(click.progressbar, **progress_options)
+
+
+def _load_schedules(schedules):
+    for i, schedule in enumerate(schedules):
+        spec = spec_from_file_location(f"user_supplied_module_{i}", schedule)
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for clsname, definition in inspect.getmembers(module):
+            if inspect.isclass(definition) and issubclass(definition, Schedule):
+                if hasattr(definition, "schedule"):
+                    yield clsname, definition
 
 
 if __name__ == "__main__":
