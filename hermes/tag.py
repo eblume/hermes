@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-from collections.abc import MutableMapping
 import datetime as dt
 import re
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 import attr
 
@@ -60,59 +59,35 @@ class Tag(Spannable):
         return Tag(self.name, category, self.valid_from, self.valid_to)
 
     @classmethod
-    def from_span(cls, span: Span, name: str, category: Optional[Category] = None, **kwargs) -> "Tag":
+    def from_span(
+        cls, span: Span, name: str, category: Optional[Category] = None, **kwargs
+    ) -> "Tag":  # This is where the BaseTag thing is needed.
         if kwargs:  # for subclassing
             raise ValueError("Unknown kwargs", kwargs)
 
-        return cls(name=name, category=category, valid_from=span.begins_at, valid_to=span.finish_at)
+        return cls(
+            name=name,
+            category=category,
+            valid_from=span.begins_at,
+            valid_to=span.finish_at,
+        )
 
 
-MetaMapT = Optional[Mapping[str, Any]]
+@attr.s(slots=True, auto_attribs=True)
+class MetaTag:
+    """Tag with additional Metadata. Note that this class is NOT immutable."""
 
-
-class MetaTag(Tag, MutableMapping):
-    """Tag with additional Metadata. Serialization of data (JSON, YAML, etc.)
-    is not considered in this class.
-
-    Note that the metadata stored in such a tag is mutable, and is NOT part
-    of the hashable 'core data' included in every Tag. So while you can have
-    two MetaTags with different data but the same core data, they will still
-    evaluate as being equivalent. Example:
-
-    >>> time1 = datetime.now()
-    >>> time2 = time1 + timedelta(seconds=5)
-    >>> t1 = MetaTag("Foo", None, time1, data={'foo': 'bar'})
-    >>> t2 = MetaTag("Foo", None, time2, data={'biff': 'boff'})
-    >>> t1 == t2
-    True
-    >>> hash(t1) == hash(t2)
-    True
-    """
-
-    def __init__(self, data: MetaMapT=None, **kwargs) -> None:
-        super().__init__(**kwargs)
-        object.__setattr__(self, "_data", data or {})  # MetaTags are no longer frozen
+    tag: Tag
+    data: Mapping[str, Any] = attr.ib(factory=dict)
 
     @classmethod
-    def from_span(cls, span: Span, data: MetaMapT=None, **kwargs) -> "MetaTag":
-        tag = super().from_span(span, **kwargs)
-        return cls.from_tag(tag, data)
-
-    @classmethod
-    def from_tag(cls, tag: Tag, data: MetaMapT=None) -> "MetaTag":
-        return cls(name=tag.name, category=tag.category, valid_from=tag.valid_from, valid_to=tag.valid_to, data=data)
-
-    def __getitem__(self, key: str) -> Any:
-        return self._data[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self._data[key] = value
-
-    def __delitem__(self, key: str) -> None:
-        del self._data[key]
-
-    def __iter__(self) -> Iterable[str]:
-        yield from self._data
-
-    def __len__(self) -> int:
-        return len(self._data)
+    def create(
+        cls,
+        name: str,
+        category: Optional[Category],
+        valid_from: Optional[dt.datetime],
+        valid_to: Optional[dt.datetime],
+        data: Optional[Mapping[str, Any]] = None,
+    ) -> "MetaTag":
+        tag = Tag(name, category, valid_from, valid_to)
+        return cls(tag, data or dict())

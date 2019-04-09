@@ -74,5 +74,17 @@ def generic_ro_timespan(request, complex_timespan_tags):
 
 @pytest.fixture
 def generic_span():
-    begins = dt.datetime(year=2018, month=2, day=10, hour=7, minute=3, second=4, microsecond=5, tzinfo=tzlocal())
-    return Span(begins_at=begins, finish_at=begins + dt.timedelta(days=2, hours=4, microseconds=6))
+    begins = dt.datetime(
+        year=2018,
+        month=2,
+        day=10,
+        hour=7,
+        minute=3,
+        second=4,
+        microsecond=5,
+        tzinfo=tzlocal(),
+    )
+    return Span(
+        begins_at=begins,
+        finish_at=begins + dt.timedelta(days=2, hours=4, microseconds=6),
+    )

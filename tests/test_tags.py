@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import datetime as dt
 
 from hermes.categorypool import MutableCategoryPool
@@ -125,16 +126,23 @@ def test_subspans(generic_ro_timespan):
 
 
 def test_meta_tags(generic_span):
-    tag = MetaTag.from_span(generic_span, name="example tag", data={'foo': 'bar'})
-    assert tag['foo'] == 'bar'
+    tag = Tag.from_span(generic_span, name="example tag")
+    mtag = MetaTag(tag, {"foo": "bar"})
+    assert mtag.data["foo"] == "bar"
 
 
 def test_meta_tag_equality(generic_span):
     time1 = generic_span.begins_at
     time2 = generic_span.finish_at
-    t1 = MetaTag(name="Foo", category=None, valid_from=time1, valid_to=time2,
-                 data={'foo': 'bar'})
-    t2 = MetaTag(name="Foo", category=None, valid_from=time1, valid_to=time2,
-                 data={'biff': 'boff'})
-    assert t1 == t2
-    assert hash(t1) == hash(t2)
+    t1 = MetaTag.create(
+        name="Foo", category=None, valid_from=time1, valid_to=time2, data={"foo": "bar"}
+    )
+    t2 = MetaTag.create(
+        name="Foo",
+        category=None,
+        valid_from=time1,
+        valid_to=time2,
+        data={"biff": "boff"},
+    )
+    assert t1 != t2
+    assert t1.tag == t2.tag
