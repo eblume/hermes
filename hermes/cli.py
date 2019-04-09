@@ -295,7 +295,7 @@ def _make_progress_iter(context):
         "show_eta": False,
         "show_pos": True,
     }
-    progress_options["length"] = context.gcal.client.span.total_seconds()
+    progress_options["length"] = (context.gcal.finish_at - context.gcal.begins_at).total_seconds()
     return partial(click.progressbar, **progress_options)
 
 

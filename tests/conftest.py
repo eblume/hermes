@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
 
+from dateutil.tz import tzlocal
+from hermes.span import Span
 from hermes.timespan import Category, SqliteTimeSpan, Tag, TimeSpan
-
 import pytest
 
 
@@ -69,3 +70,9 @@ def generic_ro_timespan(request, complex_timespan_tags):
         raise ValueError("Not in GENERIC_RO_TIMESPANS:", request.param)
 
     return GENERIC_RO_TIMESPANS[request.param](complex_timespan_tags)
+
+
+@pytest.fixture
+def generic_span():
+    begins = dt.datetime(year=2018, month=2, day=10, hour=7, minute=3, second=4, microsecond=5, tzinfo=tzlocal())
+    return Span(begins_at=begins, finish_at=begins + dt.timedelta(days=2, hours=4, microseconds=6))
