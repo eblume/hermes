@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
 import re
-from typing import Any, Mapping, Optional
+from typing import Any, MutableMapping, Optional
+from uuid import uuid4 as uuid
 
 import attr
 
@@ -78,7 +79,7 @@ class MetaTag:
     """Tag with additional Metadata. Note that this class is NOT immutable."""
 
     tag: Tag
-    data: Mapping[str, Any] = attr.ib(factory=dict)
+    data: MutableMapping[str, Any] = attr.ib(factory=dict)
 
     @classmethod
     def create(
@@ -87,7 +88,19 @@ class MetaTag:
         category: Optional[Category],
         valid_from: Optional[dt.datetime],
         valid_to: Optional[dt.datetime],
-        data: Optional[Mapping[str, Any]] = None,
+        data: Optional[MutableMapping[str, Any]] = None,
     ) -> "MetaTag":
         tag = Tag(name, category, valid_from, valid_to)
         return cls(tag, data or dict())
+
+
+class IDTag(MetaTag):
+    """A tag with a random unique ID (UUID)"""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.data.setdefault("id", str(uuid()))
+
+    @property
+    def id(self) -> str:
+        return self.data["id"]
