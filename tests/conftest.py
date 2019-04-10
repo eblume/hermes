@@ -3,7 +3,8 @@ import datetime as dt
 
 from dateutil.tz import tzlocal
 from hermes.span import Span
-from hermes.timespan import Category, SqliteTimeSpan, Tag, TimeSpan
+from hermes.tag import Category, MetaTag, Tag
+from hermes.timespan import SqliteMetaTimeSpan, SqliteTimeSpan, TimeSpan
 import pytest
 
 
@@ -57,9 +58,20 @@ def sqlite_timespan(complex_timespan_tags):
     return SqliteTimeSpan(complex_timespan_tags)
 
 
+@pytest.fixture(scope="function")
+def sqlite_metatimespan(complex_timespan_tags):
+    ts = SqliteMetaTimeSpan()
+    keys = ["foo", "bar", "☃", "null"]
+    values = [10, "hello", ["this", "is", "a", "snowman", "☃"], None]
+    for keyarg, valarg, tag in zip(keys, values, complex_timespan_tags):
+        ts.insert_metatag(MetaTag(tag=tag, data={keyarg: valarg}))
+    return ts
+
+
 GENERIC_RO_TIMESPANS = {
-    "base": lambda tags: TimeSpan(tags),
-    "sqlite": lambda tags: SqliteTimeSpan(tags),
+    "base": lambda tags: TimeSpan(tags=tags),
+    "sqlite": lambda tags: SqliteTimeSpan(tags=tags),
+    "sqlitemeta": lambda tags: SqliteMetaTimeSpan(tags=tags),
 }
 
 

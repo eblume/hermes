@@ -199,3 +199,16 @@ def test_sqlite_writable(sqlite_timespan):
     with tempfile.NamedTemporaryFile() as tempf:
         with pytest.raises(ValueError):
             sqlite_timespan.write_to(Path(tempf.name))
+
+
+def test_sqlitemeta_data(sqlite_metatimespan):
+    assert isinstance(sqlite_metatimespan, WriteableTimeSpan)
+    data = {
+        key: value
+        for mt in sqlite_metatimespan.iter_metatags()
+        for key, value in mt.data.items()
+    }
+    assert "☃" in data
+    assert data["☃"][3] == "snowman"
+    assert data["foo"] == 10
+    assert data["null"] is None

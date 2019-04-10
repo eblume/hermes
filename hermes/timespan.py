@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import abc
 import datetime as dt
+import json
 from operator import attrgetter
 from pathlib import Path
 from typing import Any, cast, Iterable, Optional, Set, Union
@@ -12,7 +13,7 @@ from dateutil.tz import tzutc
 
 from .categorypool import BaseCategoryPool, CategoryPool, MutableCategoryPool
 from .span import Span, Spannable
-from .tag import Category, Tag
+from .tag import Category, MetaTag, Tag
 
 
 def date_parse(datestring: str) -> dt.datetime:
@@ -166,25 +167,28 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
 
         with self._sqlite_db:
             conn = self._sqlite_db.cursor()
-            conn.execute(
-                """
-                CREATE TABLE tags (
-                    valid_from datetime,
-                    valid_to datetime,
-                    name text,
-                    category text
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE UNIQUE INDEX tags_idx ON tags (valid_from, valid_to, name)
-                """
-            )
+            self._create_table(conn)
 
-            if tags:
-                for tag in tags:
-                    self.insert_tag(tag)
+        if tags:
+            for tag in tags:
+                self.insert_tag(tag)
+
+    def _create_table(self, conn) -> None:
+        conn.execute(
+            """
+            CREATE TABLE tags (
+                valid_from datetime,
+                valid_to datetime,
+                name text,
+                category text
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX tags_idx ON tags (valid_from, valid_to, name)
+            """
+        )
 
     def __len__(self) -> int:
         with self._sqlite_db:
@@ -197,7 +201,11 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
             category_str = tag.category.fullpath if tag.category else "sqlite3"
             category = self._category_pool.get_category(category_str, create=True)
             conn.execute(
-                "INSERT INTO tags VALUES (:valid_from, :valid_to, :name, :category)",
+                """
+                INSERT INTO
+                tags (valid_from, valid_to, name, category)
+                VALUES (:valid_from, :valid_to, :name, :category)
+                """,
                 {
                     "valid_from": tag.valid_from.astimezone(tzutc()).isoformat()
                     if tag.valid_from
@@ -360,3 +368,72 @@ class SqliteTimeSpan(InsertableTimeSpan, RemovableTimeSpan, WriteableTimeSpan):
         with new_timespan._sqlite_db.backup("main", file_db, "main") as backup:
             backup.step()  # This can be split in to chunks if need be
         return new_timespan
+
+
+class SqliteMetaTimeSpan(SqliteTimeSpan):
+    def __init__(
+        self,
+        tags: Optional[Iterable[Tag]] = None,
+        metatags: Optional[Iterable[MetaTag]] = None,
+    ) -> None:
+        super().__init__(tags)
+        if metatags:
+            for tag in metatags:
+                self.insert_metatag(tag)
+
+    def _create_table(self, conn) -> None:
+        conn.execute(
+            """
+            CREATE TABLE tags (
+                valid_from datetime,
+                valid_to datetime,
+                name text,
+                category text,
+                metadata text DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX tags_idx ON tags (valid_from, valid_to, name)
+            """
+        )
+
+    def insert_metatag(self, metatag: MetaTag) -> None:
+        tag = metatag.tag
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            category_str = tag.category.fullpath if tag.category else "sqlite3"
+            category = self._category_pool.get_category(category_str, create=True)
+            conn.execute(
+                """
+                INSERT INTO
+                tags (valid_from, valid_to, name, category, metadata)
+                VALUES (:valid_from, :valid_to, :name, :category, :metadata)
+                """,
+                {
+                    "valid_from": tag.valid_from.astimezone(tzutc()).isoformat()
+                    if tag.valid_from
+                    else None,
+                    "valid_to": tag.valid_to.astimezone(tzutc()).isoformat()
+                    if tag.valid_to
+                    else None,
+                    "name": tag.name,
+                    "category": category.fullpath,
+                    "metadata": json.dumps(metatag.data),
+                },
+            )
+
+    def iter_metatags(self) -> Iterable[MetaTag]:
+        with self._sqlite_db:
+            cursor = self._sqlite_db.cursor()
+            result = cursor.execute(
+                "SELECT valid_from, valid_to, name, category, metadata FROM tags"
+            )
+            for row in result:
+                yield self._metatag_from_row(row)
+
+    def _metatag_from_row(self, row: Any) -> MetaTag:
+        tag = self._tag_from_row(row[0:4])
+        data = json.loads(row[4]) if row[4] else {}
+        return MetaTag(tag=tag, data=data)
