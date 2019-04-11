@@ -26,7 +26,10 @@ class Schedule:
     as an actual schedule!
 
     To put it another way: All children-classes of Schedule that implement
-    a `schedule` method WILL be scheduled.
+    a `schedule` method WILL be scheduled. This behavior is enforced by the
+    CLI of hermes, rather than the package itself, so if you are not using
+    the CLI then you don't 'need' to do this, but you'll still have
+    to build an actual schedule at some point.
 
     Finally, note that you can override `NAME` as an attribute on a schedule
     in order to provide a different name to the tagger. This changes, at
