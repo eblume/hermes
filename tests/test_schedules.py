@@ -66,15 +66,28 @@ def example_daily_schedule():
     return MyDailySchedule
 
 
-def test_daily_schedule_can_schedule(example_daily_schedule):
+@pytest.fixture(scope="function")
+def built_schedule(example_daily_schedule):
     schedule = example_daily_schedule()
     schedule.schedule()
-    span = Span.from_date(date.today())
-    events = list(schedule.populate(span))
-    assert len(events) == 12
-    for event in events:
+    return schedule
+
+
+@pytest.fixture
+def a_day():
+    return Span.from_date(date.today())
+
+
+@pytest.fixture(scope="function")
+def scheduled_events(built_schedule, a_day):
+    return list(built_schedule.populate(a_day))
+
+
+def test_daily_schedule_can_schedule(scheduled_events, a_day):
+    assert len(scheduled_events) == 12
+    for event in scheduled_events:
         assert event.valid_from < event.valid_to
-        assert event.valid_from > span.begins_at
-        assert event.valid_to < span.finish_at
-    assert len({event.valid_from for event in events}) == 12
-    assert len({event.valid_to for event in events}) == 12
+        assert event.valid_from > a_day.begins_at
+        assert event.valid_to < a_day.finish_at
+    assert len({event.valid_from for event in scheduled_events}) == 12
+    assert len({event.valid_to for event in scheduled_events}) == 12
