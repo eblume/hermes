@@ -87,3 +87,15 @@ class Span(Spannable):
         )
         stop = start + dt.timedelta(days=1, microseconds=-1)
         return cls(begins_at=start, finish_at=stop)
+
+
+@functools.total_ordering
+@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+class FiniteSpan(Span):
+    """A span that is definitely finite."""
+
+    begins_at: dt.datetime
+    finish_at: dt.datetime
+
+    def is_finite(self) -> bool:
+        return True

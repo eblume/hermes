@@ -5,7 +5,7 @@ from typing import cast, Dict, Iterable, List, Optional, Tuple
 from dateutil.tz import tzlocal
 from ortools.sat.python import cp_model
 
-from .span import Span
+from .span import FiniteSpan, Span
 from .tag import Tag
 
 
@@ -99,121 +99,44 @@ class Schedule:
         task_a.not_within.append((task_b, bound))
 
     def populate(self, span: Span) -> List[Tag]:
-        if span.begins_at is None or span.finish_at is None:
+        if not span.is_finite():
             raise ValueError("Schedules must have concrete, finite spans.")
+        span = cast(FiniteSpan, span)
 
-        start_times = [
-            self.model.NewIntVar(
-                int(span.begins_at.timestamp()),  # upper_bound
-                int((span.finish_at - task.duration).timestamp()),  # lower_bound
-                task.name,
-            )
-            for task in self.tasks.values()
-        ]
-
-        stop_times = [
-            self.model.NewIntVar(
-                int((span.begins_at + task.duration).timestamp()),  # upper_bound
-                int(span.finish_at.timestamp()),  # lower_bound
-                task.name,
-            )
-            for task in self.tasks.values()
-        ]
-
-        intervals = [
-            self.model.NewIntervalVar(
-                start_time, int(task.duration.total_seconds()), stop_time, task.name
-            )
-            for task, start_time, stop_time in zip(
-                self.tasks.values(), start_times, stop_times
-            )
-        ]
-
-        # Helper data structure for the above
-        tasks_to_times = {
-            otask.name: (start_time, stop_time)
-            for otask, start_time, stop_time in zip(
-                self.tasks.values(), start_times, stop_times
-            )
+        event_times = {
+            task.name: EventTime(self.model, span, task) for task in self.tasks.values()
         }
 
         # No time overlapping
-        self.model.AddNoOverlap(intervals)
+        self.model.AddNoOverlap(
+            event_time.interval for event_time in event_times.values()
+        )
 
         # Additional constraints
-        for task, start_time, stop_time in zip(
-            self.tasks.values(), start_times, stop_times
-        ):
-            # event windows
-            windows = []
-            for i, window in enumerate(self.event_windows(span)):
-                start_cons = start_time > int(
-                    cast(datetime, window.begins_at).timestamp()
-                )
-                stop_cons = stop_time < int(
-                    cast(datetime, window.finish_at).timestamp()
-                )
-                this_window = self.model.NewBoolVar(f"{task.name}_window_{i}")
-                self.model.Add(start_cons).OnlyEnforceIf(this_window)
-                self.model.Add(stop_cons).OnlyEnforceIf(this_window)
-                windows.append(this_window)
-            self.model.AddBoolXOr(windows)
+        for event_time in event_times.values():
+            # event windows - pick one, and be in it.
+            event_time.windows_constraint(self.event_windows(span))
 
             # between intervals
             # 'between' refers to hours in the day, so this is basically just
             # another scheduling window constraint, but individualized per-task
-            if task.between is not None:
-                days = []
-                daily_start = task.between[0]
-                daily_stop = task.between[1]
-                for i, day in enumerate(dates_between(span)):
-                    start = int(datetime.combine(day, daily_start).timestamp())
-                    stop = int(datetime.combine(day, daily_stop).timestamp())
-                    start_cons = start_time > start
-                    stop_cons = stop_time < stop
-                    this_day = self.model.NewBoolVar(f"day_{i}_between_{task.name}")
-                    self.model.Add(start_cons).OnlyEnforceIf(this_day)
-                    self.model.Add(stop_cons).OnlyEnforceIf(this_day)
-                    days.append(this_day)
-                self.model.AddBoolXOr(days)
+            event_time.between_constraint()
 
             # by constraint
             # Same note here as for 'between'.
-            if task.by:
-                days = []
-                for i, day in enumerate(dates_between(span)):
-                    by_time = int(datetime.combine(day, task.by).timestamp())
-                    this_day = self.model.NewBoolVar(f"day_{i}_by_{task.name}")
-                    self.model.Add(stop_time < by_time).OnlyEnforceIf(this_day)
-                    days.append(this_day)
-                self.model.AddBoolXOr(days)
+            event_time.by_constraint()
 
             # after constraint
             # Same note here as for 'between'.
-            if task.after:
-                for other_task in task.after:
-                    other_start, other_stop = tasks_to_times[other_task.name]
-                    self.model.Add(start_time > other_stop)
+            event_time.after_constraint(
+                event_times[other_task.name] for other_task in event_time.task.after
+            )
 
             # not-within bounds
-            if task.not_within:
-                for other_task, bound in task.not_within:
-                    other_start, other_stop = tasks_to_times[other_task.name]
-                    gap = int(bound.total_seconds())
-                    smallest_stop = self.model.NewIntVar(
-                        int(span.begins_at.timestamp()),
-                        int(span.finish_at.timestamp()),
-                        f"smallest_stop_{task.name}_{other_task.name}",
-                    )
-                    largest_start = self.model.NewIntVar(
-                        int(span.begins_at.timestamp()),
-                        int(span.finish_at.timestamp()),
-                        f"largest_start_{task.name}_{other_task.name}",
-                    )
-                    self.model.AddMinEquality(smallest_stop, [stop_time, other_stop])
-                    self.model.AddMaxEquality(largest_start, [start_time, other_start])
-
-                    self.model.Add(largest_start - smallest_stop > gap)
+            event_time.not_within_constraint(
+                (event_times[other_task.name], bound)
+                for other_task, bound in event_time.task.not_within
+            )
 
         # And, now for the magic!
         solver = cp_model.CpSolver()
@@ -225,16 +148,16 @@ class Schedule:
 
         return [
             Tag(
-                name=task.name,
+                name=event_time.task.name,
                 # TODO - category,
                 valid_from=datetime.fromtimestamp(
-                    solver.Value(start_time), timezone.utc
+                    solver.Value(event_time.start_time), timezone.utc
                 ),
-                valid_to=datetime.fromtimestamp(solver.Value(stop_time), timezone.utc),
+                valid_to=datetime.fromtimestamp(
+                    solver.Value(event_time.stop_time), timezone.utc
+                ),
             )
-            for task, start_time, stop_time in zip(
-                self.tasks.values(), start_times, stop_times
-            )
+            for event_time in event_times.values()
         ]
 
 
@@ -291,3 +214,107 @@ class DailySchedule(Schedule):
                 begins_at=max(start, overall.begins_at),
                 finish_at=min(stop, overall.finish_at),
             )
+
+
+class EventTime:
+    """Encapsulation for constraint variables representing event times."""
+
+    def __init__(self, model: cp_model.CpModel, span: FiniteSpan, task: Task) -> None:
+        self.start_time: cp_model.IntVar = model.NewIntVar(
+            int(span.begins_at.timestamp()),  # upper_bound
+            int((span.finish_at - task.duration).timestamp()),  # lower_bound
+            task.name,
+        )
+
+        self.stop_time: cp_model.IntVar = model.NewIntVar(
+            int((span.begins_at + task.duration).timestamp()),  # upper_bound
+            int(span.finish_at.timestamp()),  # lower_bound
+            task.name,
+        )
+
+        self.interval: cp_model.IntVar = model.NewIntervalVar(
+            self.start_time,
+            int(task.duration.total_seconds()),
+            self.stop_time,
+            task.name,
+        )
+
+        # and some backrefs, because why not, and GC is 'cheap'
+        self.model = model
+        self.span = span
+        self.task = task
+
+    def windows_constraint(self, event_windows: Iterable[Span]) -> None:
+        cons = []
+        for i, window in enumerate(event_windows):
+            start_cons = self.start_time > int(
+                cast(datetime, window.begins_at).timestamp()
+            )
+            stop_cons = self.stop_time < int(
+                cast(datetime, window.finish_at).timestamp()
+            )
+            this_window = self.model.NewBoolVar(f"{self.task.name}_window_{i}")
+            self.model.Add(start_cons).OnlyEnforceIf(this_window)
+            self.model.Add(stop_cons).OnlyEnforceIf(this_window)
+            cons.append(this_window)
+
+        if not cons:
+            raise ValueError("All schedules must have at least one window")
+
+        self.model.AddBoolXOr(cons)
+
+    def between_constraint(self) -> None:
+        if self.task.between is not None:
+            cons = []
+            daily_start = self.task.between[0]
+            daily_stop = self.task.between[1]
+            for i, day in enumerate(dates_between(self.span)):
+                start = int(datetime.combine(day, daily_start).timestamp())
+                stop = int(datetime.combine(day, daily_stop).timestamp())
+                start_cons = self.start_time > start
+                stop_cons = self.stop_time < stop
+                this_day = self.model.NewBoolVar(f"day_{i}_between_{self.task.name}")
+                self.model.Add(start_cons).OnlyEnforceIf(this_day)
+                self.model.Add(stop_cons).OnlyEnforceIf(this_day)
+                cons.append(this_day)
+            self.model.AddBoolXOr(cons)
+
+    def by_constraint(self) -> None:
+        if self.task.by:
+            days = []
+            for i, day in enumerate(dates_between(self.span)):
+                by_time = int(datetime.combine(day, self.task.by).timestamp())
+                this_day = self.model.NewBoolVar(f"day_{i}_by_{self.task.name}")
+                self.model.Add(self.stop_time < by_time).OnlyEnforceIf(this_day)
+                days.append(this_day)
+            self.model.AddBoolXOr(days)
+
+    def after_constraint(self, other_times: Iterable["EventTime"]) -> None:
+        if self.task.after:
+            for other_time in other_times:
+                self.model.Add(self.start_time > other_time.stop_time)
+
+    def not_within_constraint(
+        self, other_times: Iterable[Tuple["EventTime", timedelta]]
+    ) -> None:
+        if self.task.not_within:
+            for other_time, bound in other_times:
+                gap = int(bound.total_seconds())
+                smallest_stop = self.model.NewIntVar(
+                    int(self.span.begins_at.timestamp()),
+                    int(self.span.finish_at.timestamp()),
+                    f"smallest_stop_{self.task.name}_{other_time.task.name}",
+                )
+                largest_start = self.model.NewIntVar(
+                    int(self.span.begins_at.timestamp()),
+                    int(self.span.finish_at.timestamp()),
+                    f"largest_start_{self.task.name}_{other_time.task.name}",
+                )
+                self.model.AddMinEquality(
+                    smallest_stop, [self.stop_time, other_time.stop_time]
+                )
+                self.model.AddMaxEquality(
+                    largest_start, [self.start_time, other_time.start_time]
+                )
+
+                self.model.Add(largest_start - smallest_stop > gap)
