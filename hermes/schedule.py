@@ -45,6 +45,7 @@ class Schedule:
         self.tasks: Dict[str, "Task"] = {}
         self.model: cp_model.CpModel = cp_model.CpModel()
         self._pre_existing_events: List[Tag] = []
+        self._skip_existing: bool = True
 
     def event_windows(self, overall: Span) -> Iterable[Span]:
         """Generate all valid scheduling windows over the given span.
@@ -95,10 +96,17 @@ class Schedule:
         if after is not None:
             task.after.append(after)
 
-    def pre_existing_events(self, events: Iterable[Tag]) -> None:
+    def pre_existing_events(
+        self, events: Iterable[Tag], skip_existing: bool = True
+    ) -> None:
         """Tell the scheduler about these pre-existing events. It will not
-        schedule any overlapping events during these events."""
+        schedule any overlapping events during these events.
+
+        If `preserve_schedule` is True (default), events that are already scheduled
+        that show up in the pending schedule will not be rescheduled
+        """
         self._pre_existing_events = list(events)
+        self._skip_existing = skip_existing
 
     def not_within(self, task_a: "Task", task_b: "Task", bound: timedelta) -> None:
         """task_a and task_b must both not start or stop within `bound` of eachother."""
@@ -109,9 +117,12 @@ class Schedule:
             raise ValueError("Schedules must have concrete, finite spans.")
         span = cast(FiniteSpan, span)
 
-        event_times = {
-            task.name: EventTime(self.model, span, task) for task in self.tasks.values()
-        }
+        pre_existing_event_names = {e.name for e in self._pre_existing_events}
+        event_times = {}
+        for task in self.tasks.values():
+            if task.name in pre_existing_event_names and self._skip_existing:
+                continue
+            event_times[task.name] = EventTime(self.model, span, task)
 
         # No time overlapping
         self.model.AddNoOverlap(

@@ -19,11 +19,6 @@ def example_daily_schedule():
             medicine = Task("Take my medicine", duration=timedelta(minutes=10))
             self.task(medicine)
 
-            # Drink metamucil but not within 1 hour of taking medicine
-            metamucil = Task("Drink metamucil", duration=timedelta(minutes=10))
-            self.task(metamucil)
-            self.not_within(medicine, metamucil, timedelta(minutes=60))
-
             # Make bed
             make_bed = Task("Make my bed", duration=timedelta(minutes=10))
             self.task(make_bed, by=time(hour=10))
@@ -63,6 +58,11 @@ def example_daily_schedule():
             # Set out clothes for tomorrow by 10pm and after dinner
             clothes = Task("Set out clothes", duration=timedelta(minutes=15))
             self.task(clothes, after=dinner, by=time(hour=22))
+
+            # Drink metamucil but not within 1 hour of taking medicine
+            metamucil = Task("Drink metamucil", duration=timedelta(minutes=10))
+            self.task(metamucil)
+            self.not_within(medicine, metamucil, timedelta(minutes=60))
 
     return MyDailySchedule
 
@@ -114,3 +114,35 @@ def test_can_schedule_with_unknown_preexisting_events(example_daily_schedule, a_
     for event in scheduled_events:
         assert event.span not in eight_am_hour
         assert event.span not in twelve_pm_hour
+
+
+def test_can_schedule_with_known_preexisting_events(example_daily_schedule, a_day):
+    twelve_pm_hour = Span(
+        begins_at=a_day.begins_at.replace(hour=12),
+        finish_at=a_day.begins_at.replace(hour=12, minute=10),
+    )
+    pre_existing_events = [Tag.from_span(twelve_pm_hour, "Eat lunch")]
+
+    schedule = example_daily_schedule()
+    schedule.schedule()
+    schedule.pre_existing_events(pre_existing_events)
+    scheduled_events = list(schedule.populate(a_day))
+
+    assert len(scheduled_events) == 11
+
+
+def test_can_schedule_with_known_preexisting_events_by_ignoring_them(
+    example_daily_schedule, a_day
+):
+    twelve_pm_hour = Span(
+        begins_at=a_day.begins_at.replace(hour=12),
+        finish_at=a_day.begins_at.replace(hour=12, minute=10),
+    )
+    pre_existing_events = [Tag.from_span(twelve_pm_hour, "Eat lunch")]
+
+    schedule = example_daily_schedule()
+    schedule.schedule()
+    schedule.pre_existing_events(pre_existing_events, skip_existing=False)
+    scheduled_events = list(schedule.populate(a_day))
+
+    assert len(scheduled_events) == 12
