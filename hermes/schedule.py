@@ -97,7 +97,7 @@ class Schedule:
             task.after.append(after)
 
     def pre_existing_events(
-        self, events: Iterable[Tag], skip_existing: bool = True
+        self, events: Iterable[Tag], preserve_schedule: bool = True
     ) -> None:
         """Tell the scheduler about these pre-existing events. It will not
         schedule any overlapping events during these events.
@@ -106,7 +106,7 @@ class Schedule:
         that show up in the pending schedule will not be rescheduled
         """
         self._pre_existing_events = list(events)
-        self._skip_existing = skip_existing
+        self._preserve_schedule = preserve_schedule
 
     def not_within(self, task_a: "Task", task_b: "Task", bound: timedelta) -> None:
         """task_a and task_b must both not start or stop within `bound` of eachother."""
@@ -120,7 +120,7 @@ class Schedule:
         pre_existing_event_names = {e.name for e in self._pre_existing_events}
         event_times = {}
         for task in self.tasks.values():
-            if task.name in pre_existing_event_names and self._skip_existing:
+            if task.name in pre_existing_event_names and self._preserve_schedule:
                 continue
             event_times[task.name] = EventTime(self.model, span, task)
 

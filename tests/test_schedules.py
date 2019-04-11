@@ -134,6 +134,7 @@ def test_can_schedule_with_known_preexisting_events(example_daily_schedule, a_da
 def test_can_schedule_with_known_preexisting_events_by_ignoring_them(
     example_daily_schedule, a_day
 ):
+    # Note that by 'ignore' here we mean 'schedule around, and duplicate'
     twelve_pm_hour = Span(
         begins_at=a_day.begins_at.replace(hour=12),
         finish_at=a_day.begins_at.replace(hour=12, minute=10),
@@ -142,7 +143,9 @@ def test_can_schedule_with_known_preexisting_events_by_ignoring_them(
 
     schedule = example_daily_schedule()
     schedule.schedule()
-    schedule.pre_existing_events(pre_existing_events, skip_existing=False)
+    schedule.pre_existing_events(pre_existing_events, preserve_schedule=False)
     scheduled_events = list(schedule.populate(a_day))
 
     assert len(scheduled_events) == 12
+    for event in scheduled_events:
+        assert event.span not in twelve_pm_hour
