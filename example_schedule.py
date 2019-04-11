@@ -12,7 +12,7 @@ class MyDailySchedule(DailySchedule):
 
         # Take medicine
         medicine = Task("Take my medicine", duration=timedelta(minutes=10))
-        self.task(medicine)
+        self.task(medicine, by=time(hour=9))
 
         # Drink metamucil but not within 1 hour of taking medicine
         metamucil = Task("Drink metamucil", duration=timedelta(minutes=10))

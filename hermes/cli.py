@@ -12,6 +12,7 @@ from functools import partial
 from importlib.util import module_from_spec, spec_from_file_location
 import inspect
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
 
 from appdirs import user_config_dir
@@ -28,6 +29,8 @@ from .timespan import date_parse
 DEFAULT_CONFIG_FILE = Path(user_config_dir()) / "hermes" / "hermes.ini"
 
 DEFAULT_CONFIG = {"hermes": {"gcal calendar": ""}}
+
+PYTHON_LIST = list  # DUMB: 'list' is the command word, but click needs that...
 
 
 class CallContext:
@@ -208,9 +211,34 @@ def clear(context, calendar, calendar_id, yes):
 @calendars.command()
 @click.option("--calendar", default=None, help="Name of the calendar to use.")
 @click.option("--calendar-id", default=None, help="ID of the calendar to use.")
+@click.option(
+    "--check-calendar",
+    default=None,
+    help="Check this calendar first and don't schedule events on top of it.",
+    multiple=True,
+)
+@click.option(
+    "--check-calendar-id",
+    default=None,
+    help="Check this calendar first and don't schedule events on top of it.",
+    multiple=True,
+)
+@click.option(
+    "--check-this-calendar/--no-check-this-calendar",
+    default=True,
+    help="Check the same calendar Hermes is scheduling with and don't schedule events on top of it.",
+)
 @click.argument("schedules", type=click.Path(exists=True), nargs=-1)
 @pass_call_context
-def schedule(context, calendar=None, calendar_id=None, schedules=None):
+def schedule(
+    context,
+    check_this_calendar,
+    calendar=None,
+    calendar_id=None,
+    schedules=None,
+    check_calendar=None,
+    check_calendar_id=None,
+):
     """Import the specified schedule files (which are python files) and populate
     the specified calendar according to schedule definitions in those files."""
 
@@ -233,6 +261,20 @@ def schedule(context, calendar=None, calendar_id=None, schedules=None):
     )
     base_category = Category("Hermes", None) / "Daily Schedule"
 
+    pre_existing_calendars = PYTHON_LIST(check_calendar_id)
+    for calendar_name in check_calendar:
+        pre_existing_calendars.append(
+            context.gcal.client.calendar_by_name(calendar_name)["id"]
+        )
+    if check_this_calendar:
+        pre_existing_calendars.append(target_calendar_id)
+
+    pre_existing_events = [
+        event
+        for calendar_id in pre_existing_calendars
+        for event in context.gcal.client.load_gcal(calendar_id).iter_tags()
+    ]
+
     for schedule_name, schedule_def in _load_schedules(schedules):
         click.echo(f"Scheduling with {schedule_name}")
         category = base_category / (schedule_def.NAME or schedule_name)
@@ -242,7 +284,21 @@ def schedule(context, calendar=None, calendar_id=None, schedules=None):
             click.echo(f"\ton {day.isoformat()}")
             schedule = schedule_def()
             schedule.schedule()
-            for event in schedule.populate(Span.from_date(day)):
+            if pre_existing_events:
+                schedule.pre_existing_events(pre_existing_events)
+            try:
+                events = schedule.populate(Span.from_date(day))
+            except ValueError:
+                click.secho(
+                    "Error: The scheduling problem was unfeasible. Try relaxing your constraints. Sorry about this!",
+                    bold=True,
+                )
+                click.secho(
+                    "(Note that this does not necessarily mean that it was IMPOSSIBLE - scheduling is hard!)"
+                )
+                click.secho("Nothing was written to your calendar!")
+                sys.exit(3)
+            for event in events:
                 click.echo(
                     f"\t\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
                 )
