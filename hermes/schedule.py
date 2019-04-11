@@ -43,7 +43,8 @@ class Schedule:
         if kwargs:
             raise ValueError("Unrecognized kwargs", kwargs)
         self.tasks: Dict[str, "Task"] = {}
-        self.model = cp_model.CpModel()
+        self.model: cp_model.CpModel = cp_model.CpModel()
+        self._pre_existing_events: List[Tag] = []
 
     def event_windows(self, overall: Span) -> Iterable[Span]:
         """Generate all valid scheduling windows over the given span.
@@ -94,6 +95,11 @@ class Schedule:
         if after is not None:
             task.after.append(after)
 
+    def pre_existing_events(self, events: Iterable[Tag]) -> None:
+        """Tell the scheduler about these pre-existing events. It will not
+        schedule any overlapping events during these events."""
+        self._pre_existing_events = list(events)
+
     def not_within(self, task_a: "Task", task_b: "Task", bound: timedelta) -> None:
         """task_a and task_b must both not start or stop within `bound` of eachother."""
         task_a.not_within.append((task_b, bound))
@@ -116,6 +122,9 @@ class Schedule:
         for event_time in event_times.values():
             # event windows - pick one, and be in it.
             event_time.windows_constraint(self.event_windows(span))
+
+            # pre-existing events
+            event_time.pre_existing_constraint(self._pre_existing_events)
 
             # between intervals
             # 'between' refers to hours in the day, so this is basically just
@@ -318,3 +327,16 @@ class EventTime:
                 )
 
                 self.model.Add(largest_start - smallest_stop > gap)
+
+    def pre_existing_constraint(self, events: Iterable[Tag]) -> None:
+        for i, event in enumerate(events):
+            start_after = self.start_time > int(
+                cast(datetime, event.valid_to).timestamp()
+            )
+            finish_before = self.stop_time < int(
+                cast(datetime, event.valid_from).timestamp()
+            )
+            event_is_first = self.model.NewBoolVar(f"preexist_{i}_{self.task.name}")
+
+            self.model.Add(start_after).OnlyEnforceIf(event_is_first)
+            self.model.Add(finish_before).OnlyEnforceIf(event_is_first.Not())

@@ -3,6 +3,7 @@ from datetime import date, time, timedelta
 
 from hermes.schedule import DailySchedule, Task
 from hermes.span import Span
+from hermes.tag import Tag
 import pytest
 
 
@@ -91,3 +92,25 @@ def test_daily_schedule_can_schedule(scheduled_events, a_day):
         assert event.valid_to < a_day.finish_at
     assert len({event.valid_from for event in scheduled_events}) == 12
     assert len({event.valid_to for event in scheduled_events}) == 12
+
+
+def test_can_schedule_with_unknown_preexisting_events(example_daily_schedule, a_day):
+    eight_am = a_day.begins_at.replace(hour=8)
+    eight_am_hour = Span(begins_at=eight_am, finish_at=eight_am + timedelta(minutes=10))
+    twelve_pm_hour = Span(
+        begins_at=eight_am + timedelta(hours=4),
+        finish_at=eight_am + timedelta(hours=4, minutes=10),
+    )
+    pre_existing_events = [
+        Tag.from_span(eight_am_hour, "Test event A"),
+        Tag.from_span(twelve_pm_hour, "Test event B"),
+    ]
+    schedule = example_daily_schedule()
+    schedule.pre_existing_events(pre_existing_events)
+    schedule.schedule()
+    scheduled_events = list(schedule.populate(a_day))
+
+    assert len(scheduled_events) == 12
+    for event in scheduled_events:
+        assert event.span not in eight_am_hour
+        assert event.span not in twelve_pm_hour
