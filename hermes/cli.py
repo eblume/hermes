@@ -228,17 +228,11 @@ def clear(context, calendar, calendar_id, yes):
     default=True,
     help="Check the same calendar Hermes is scheduling with and don't schedule events on top of it.",
 )
-@click.option(
-    "--replan/--no-replan",
-    default=True,
-    help="When scheduling a day, if events are found to already be scheduled, replace them.",
-)
 @click.argument("schedules", type=click.Path(exists=True), nargs=-1)
 @pass_call_context
 def schedule(
     context,
     check_this_calendar,
-    replan,
     calendar=None,
     calendar_id=None,
     schedules=None,
@@ -250,10 +244,6 @@ def schedule(
 
     if not schedules:
         raise click.UsageError("You must specify at least one schedule file.")
-    if replan and not check_this_calendar:
-        raise click.UsageError(
-            "When --no-check-this-calendar is set, you may not use --replan"
-        )
 
     calendars = _make_search_cals(context, calendar, calendar_id)
     if len(calendars) != 1:
@@ -280,13 +270,9 @@ def schedule(
         pre_existing_calendars.append(target_calendar_id)
 
     pre_existing_events = []
-    this_calendar_pre_existing_events = []
     for calendar_id in set(pre_existing_calendars):
         for event in context.gcal.client.load_gcal(calendar_id).iter_tags():
-            if calendar_id == target_calendar_id and replan:
-                this_calendar_pre_existing_events.append(event)
-            else:
-                pre_existing_events.append(event)
+            pre_existing_events.append(event)
 
     for schedule_name, schedule_def in _load_schedules(schedules):
         click.echo(f"Scheduling with {schedule_name}")
@@ -298,9 +284,7 @@ def schedule(
             schedule = schedule_def()
             schedule.schedule()
             if pre_existing_events:
-                schedule.pre_existing_events(
-                    pre_existing_events, preserve_schedule=not replan
-                )
+                schedule.pre_existing_events(pre_existing_events)
             try:
                 events = schedule.populate(Span.from_date(day))
             except ValueError:
@@ -313,13 +297,6 @@ def schedule(
                 )
                 click.secho("Nothing was written to your calendar!")
                 sys.exit(3)
-            if replan:
-                for event in this_calendar_pre_existing_events:
-                    click.echo(
-                        f"\t\tREMOVING: {event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
-                    )
-                    if not gcal.remove_tag(event):
-                        click.echo("Event not found!")
             for event in events:
                 click.echo(
                     f"\t\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"

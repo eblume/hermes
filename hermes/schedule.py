@@ -104,6 +104,8 @@ class Schedule:
 
         If `preserve_schedule` is True (default), events that are already scheduled
         that show up in the pending schedule will not be rescheduled
+
+        Repeated calls to this method just overwrite past calls.
         """
         self._pre_existing_events = list(events)
         self._preserve_schedule = preserve_schedule
@@ -117,20 +119,32 @@ class Schedule:
             raise ValueError("Schedules must have concrete, finite spans.")
         span = cast(FiniteSpan, span)
 
-        pre_existing_event_names = {e.name for e in self._pre_existing_events}
-        event_times = {}
+        event_times: Dict[str, EventTime] = {}
+
+        for event in self._pre_existing_events:
+            if event.name in event_times:
+                other_event = cast(PreExistingEventTime, event_times[event.name])
+                other_event.duplicate_event(event)
+            else:
+                event_times[event.name] = PreExistingEventTime(event)
+
         for task in self.tasks.values():
-            if task.name in pre_existing_event_names and self._preserve_schedule:
+            if task.name in event_times and self._preserve_schedule:
                 continue
             event_times[task.name] = EventTime(self.model, span, task)
 
         # No time overlapping
         self.model.AddNoOverlap(
-            event_time.interval for event_time in event_times.values()
+            event_time.interval
+            for event_time in event_times.values()
+            if not event_time.is_pre_existing()
         )
 
         # Additional constraints
         for event_time in event_times.values():
+            if event_time.is_pre_existing():
+                continue  # We can't constrain a pre-existing event... it exists already! :)
+
             # event windows - pick one, and be in it.
             event_time.windows_constraint(self.event_windows(span))
 
@@ -178,6 +192,7 @@ class Schedule:
                 ),
             )
             for event_time in event_times.values()
+            if not event_time.is_pre_existing()
         ]
 
 
@@ -312,14 +327,35 @@ class EventTime:
     def after_constraint(self, other_times: Iterable["EventTime"]) -> None:
         if self.task.after:
             for other_time in other_times:
-                self.model.Add(self.start_time > other_time.stop_time)
+                if other_time.is_pre_existing():
+                    other_time = cast(PreExistingEventTime, other_time)
+                    self.model.Add(
+                        self.start_time > int(other_time.stop_time.timestamp())
+                    )
+                else:
+                    self.model.Add(self.start_time > other_time.stop_time)
 
     def not_within_constraint(
         self, other_times: Iterable[Tuple["EventTime", timedelta]]
     ) -> None:
-        if self.task.not_within:
-            for other_time, bound in other_times:
-                gap = int(bound.total_seconds())
+        for other_time, bound in other_times:
+            gap = int(bound.total_seconds())
+            if other_time.is_pre_existing():
+                other_time = cast(PreExistingEventTime, other_time)
+                for i, event in enumerate(other_time.events):
+                    start_after = self.start_time > int(
+                        cast(datetime, event.valid_to).timestamp()
+                    )
+                    finish_before = self.stop_time < int(
+                        cast(datetime, event.valid_from).timestamp()
+                    )
+                    event_is_first = self.model.NewBoolVar(
+                        f"not_within_preexist_{i}_{self.task.name}"
+                    )
+
+                    self.model.Add(start_after).OnlyEnforceIf(event_is_first)
+                    self.model.Add(finish_before).OnlyEnforceIf(event_is_first.Not())
+            else:
                 smallest_stop = self.model.NewIntVar(
                     int(self.span.begins_at.timestamp()),
                     int(self.span.finish_at.timestamp()),
@@ -351,3 +387,43 @@ class EventTime:
 
             self.model.Add(start_after).OnlyEnforceIf(event_is_first)
             self.model.Add(finish_before).OnlyEnforceIf(event_is_first.Not())
+
+    def is_pre_existing(self):
+        return False
+
+
+class PreExistingEventTime(EventTime):
+    def __init__(self, event: Tag):
+        self.events = [event]
+
+    def is_pre_existing(self):
+        return True
+
+    def duplicate_event(self, event):
+        # Unlike Hermes scheduled events, pre-existing events don't necessarily
+        # have unique names. This facilty allows for that.
+        self.events.append(event)
+
+    @property
+    def start_time(self) -> datetime:
+        return min(cast(datetime, e.valid_from) for e in self.events)
+
+    @property
+    def stop_time(self) -> datetime:
+        return max(cast(datetime, e.valid_to) for e in self.events)
+
+    @property
+    def span(self) -> FiniteSpan:  # type: ignore
+        return FiniteSpan(begins_at=self.start_time, finish_at=self.stop_time)
+
+    @property
+    def interval(self):  # type: ignore
+        raise NotImplementedError("Not implemented for pre-existing events!")
+
+    @property
+    def task(self):  # type: ignore
+        raise NotImplementedError("Not implemented for pre-existing events!")
+
+    @property
+    def model(self):  # type: ignore
+        raise NotImplementedError("Not implemented for pre-existing events!")
