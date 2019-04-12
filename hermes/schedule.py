@@ -347,12 +347,12 @@ class EventTime:
                     smallest_stop = self.model.NewIntVar(
                         int(self.span.begins_at.timestamp()),
                         int(self.span.finish_at.timestamp()),
-                        f"smallest_stop_{self.task.name}_{other_time.task.name}",
+                        f"smallest_stop_{self.task.name}_{event.name}_preexist_{i}",
                     )
                     largest_start = self.model.NewIntVar(
                         int(self.span.begins_at.timestamp()),
                         int(self.span.finish_at.timestamp()),
-                        f"largest_start_{self.task.name}_{other_time.task.name}",
+                        f"largest_start_{self.task.name}_{event.name}_preexist_{i}",
                     )
                     this_preexisting_event = self.model.NewBoolVar(
                         f"nwi_preexist_{i}_{self.task.name}"

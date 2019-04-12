@@ -58,3 +58,7 @@ class MyDailySchedule(DailySchedule):
         # Set out clothes for tomorrow by 10pm and after dinner
         clothes = Task("Set out clothes", duration=timedelta(minutes=15))
         self.task(clothes, after=dinner, by=time(hour=22))
+
+        # Also, don't have metamucil within 30 minutes of any meal
+        for meal in [breakfast, lunch, dinner]:
+            self.not_within(metamucil, meal, timedelta(minutes=30))
