@@ -11,13 +11,17 @@ import pytest
 def example_daily_schedule():
     class MyDailySchedule(DailySchedule):
         def schedule(self):
-            # These are the defaults, but I'm including them for documentation
             self.day_start = time(hour=8)
             self.day_end = time(hour=22)
 
             # Take medicine
             medicine = Task("Take my medicine", duration=timedelta(minutes=10))
-            self.task(medicine)
+            self.task(medicine, by=time(hour=9))
+
+            # Drink metamucil but not within 1 hour of taking medicine
+            metamucil = Task("Drink metamucil", duration=timedelta(minutes=10))
+            self.task(metamucil)
+            self.not_within(medicine, metamucil, timedelta(minutes=60))
 
             # Make bed
             make_bed = Task("Make my bed", duration=timedelta(minutes=10))
@@ -59,10 +63,9 @@ def example_daily_schedule():
             clothes = Task("Set out clothes", duration=timedelta(minutes=15))
             self.task(clothes, after=dinner, by=time(hour=22))
 
-            # Drink metamucil but not within 1 hour of taking medicine
-            metamucil = Task("Drink metamucil", duration=timedelta(minutes=10))
-            self.task(metamucil)
-            self.not_within(medicine, metamucil, timedelta(minutes=60))
+            # Also, don't have metamucil within 30 minutes of any meal
+            for meal in [breakfast, lunch, dinner]:
+                self.not_within(metamucil, meal, timedelta(minutes=30))
 
     return MyDailySchedule
 
