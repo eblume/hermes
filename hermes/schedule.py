@@ -342,19 +342,36 @@ class EventTime:
             gap = int(bound.total_seconds())
             if other_time.is_pre_existing():
                 other_time = cast(PreExistingEventTime, other_time)
+                cons = []
                 for i, event in enumerate(other_time.events):
-                    start_after = self.start_time > int(
-                        cast(datetime, event.valid_to).timestamp()
+                    smallest_stop = self.model.NewIntVar(
+                        int(self.span.begins_at.timestamp()),
+                        int(self.span.finish_at.timestamp()),
+                        f"smallest_stop_{self.task.name}_{other_time.task.name}",
                     )
-                    finish_before = self.stop_time < int(
-                        cast(datetime, event.valid_from).timestamp()
+                    largest_start = self.model.NewIntVar(
+                        int(self.span.begins_at.timestamp()),
+                        int(self.span.finish_at.timestamp()),
+                        f"largest_start_{self.task.name}_{other_time.task.name}",
                     )
-                    event_is_first = self.model.NewBoolVar(
-                        f"not_within_preexist_{i}_{self.task.name}"
+                    this_preexisting_event = self.model.NewBoolVar(
+                        f"nwi_preexist_{i}_{self.task.name}"
                     )
 
-                    self.model.Add(start_after).OnlyEnforceIf(event_is_first)
-                    self.model.Add(finish_before).OnlyEnforceIf(event_is_first.Not())
+                    self.model.AddMinEquality(
+                        smallest_stop,
+                        [self.stop_time, int(other_time.stop_time.timestamp())],
+                    )
+                    self.model.AddMaxEquality(
+                        largest_start,
+                        [self.start_time, int(other_time.start_time.timestamp())],
+                    )
+
+                    self.model.Add(largest_start - smallest_stop > gap).OnlyEnforceIf(
+                        this_preexisting_event
+                    )
+                    cons.append(this_preexisting_event)
+                self.model.AddBoolXOr(cons)
             else:
                 smallest_stop = self.model.NewIntVar(
                     int(self.span.begins_at.timestamp()),
