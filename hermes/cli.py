@@ -7,7 +7,7 @@
 # of code just to get the type system to quiet down...
 
 import configparser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from importlib.util import module_from_spec, spec_from_file_location
 import inspect
@@ -226,12 +226,24 @@ def clear(context, calendar, calendar_id, yes):
 @click.option(
     "--check-this-calendar/--no-check-this-calendar",
     default=True,
-    help="Check the same calendar Hermes is scheduling with and don't schedule events on top of it.",
+    help="Check the same calendar Hermes is scheduling with and don't schedule events on top of it. You must also set --no-replan.",
+)
+@click.option(
+    "--replan/--no-replan",
+    default=True,
+    help="Delete any existing Hermes events that the specified plans already define, and replan them. By default, works only on future events (see --replan-past).",
+)
+@click.option(
+    "--replan-past/--no-replan-past",
+    default=False,
+    help="Allow --replan to delete past events. Events that have already begun but not yet finished are considered 'past events'.",
 )
 @click.argument("schedules", type=click.Path(exists=True), nargs=-1)
 @pass_call_context
 def schedule(
     context,
+    replan,
+    replan_past,
     check_this_calendar,
     calendar=None,
     calendar_id=None,
@@ -244,6 +256,14 @@ def schedule(
 
     if not schedules:
         raise click.UsageError("You must specify at least one schedule file.")
+
+    if replan and not check_this_calendar:
+        raise click.UsageError(
+            "--no-check-this-calendar requires you also set --no-replan explicitly. (Replanning requires checking this calendar.)"
+        )
+
+    if replan_past and not replan:
+        raise click.UsageError("--replan-past requires that you set --replan")
 
     calendars = _make_search_cals(context, calendar, calendar_id)
     if len(calendars) != 1:
@@ -269,13 +289,50 @@ def schedule(
     if check_this_calendar:
         pre_existing_calendars.append(target_calendar_id)
 
+    now = datetime.now(timezone.utc)
+    if replan_past:
+        replan_span = Span(
+            begins_at=context.gcal.begins_at, finish_at=context.gcal.finish_at
+        )
+    else:
+        if context.gcal.finish_at <= now:
+            raise click.UsageError(
+                "Cannot reschedule the past by default. See --reschedule-past."
+            )
+        replan_span = Span(
+            begins_at=max(context.gcal.begins_at, now), finish_at=context.gcal.finish_at
+        )
+
+    # When replan'ing, find the replanned events, so we can delete them later
+    replanned_events = set()
+    # TODO - possible race condition caused by loading this gcal twice. Cache?
+    if replan:
+        for event in context.gcal.client.load_gcal(target_calendar_id).iter_tags():
+            if event.valid_from >= replan_span.begins_at:
+                replanned_events |= {event}
+
     pre_existing_events = []
     for calendar_id in set(pre_existing_calendars):
         for event in context.gcal.client.load_gcal(calendar_id).iter_tags():
+            if (
+                replan
+                and calendar_id == target_calendar_id
+                and event in replanned_events
+            ):
+                continue
             pre_existing_events.append(event)
 
+    if replan and replanned_events:
+        click.secho("Removing previously planned events (as per --replan)", bold=True)
+        for event in replanned_events:
+            click.secho(
+                f"\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
+            )
+            gcal.remove_tag(event)
+        click.secho("\n")
+
     for schedule_name, schedule_def in _load_schedules(schedules):
-        click.echo(f"Scheduling with {schedule_name}")
+        click.echo(f"Scheduling with {schedule_name}", bold=True)
         category = base_category / (schedule_def.NAME or schedule_name)
         for day in dates_between(
             Span(begins_at=context.gcal.begins_at, finish_at=context.gcal.finish_at)

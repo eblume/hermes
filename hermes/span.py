@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import abc
 import datetime as dt
-import functools
 from typing import Iterable, Optional
 
 import attr
@@ -39,7 +38,6 @@ class Spannable(metaclass=abc.ABCMeta):
             return True
 
 
-@functools.total_ordering
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class Span(Spannable):
     """A time span, from one time to another.
@@ -89,7 +87,6 @@ class Span(Spannable):
         return cls(begins_at=start, finish_at=stop)
 
 
-@functools.total_ordering
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class FiniteSpan(Span):
     """A span that is definitely finite."""
