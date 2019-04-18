@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import date, datetime, time, timedelta, timezone
-from typing import cast, Dict, Iterable, List, Optional, Tuple
+from typing import cast, Dict, Iterable, List, Optional, Set, Tuple
 
 from dateutil.tz import tzlocal
 from ortools.sat.python import cp_model
@@ -114,7 +114,16 @@ class Schedule:
         """task_a and task_b must both not start or stop within `bound` of eachother."""
         task_a.not_within.append((task_b, bound))
 
-    def populate(self, span: Span) -> List[Tag]:
+    def populate(
+        self, span: Span, no_pick_first: Optional[Set[str]] = None
+    ) -> List[Tag]:
+        """no_pick_first should be a list of task names, which - if provided - will
+        NOT be scheduled first.
+        """
+        if no_pick_first is None:
+            no_pick_first = set()
+        no_pick_first = cast(Set[str], no_pick_first)
+
         if not span.is_finite():
             raise ValueError("Schedules must have concrete, finite spans.")
         span = cast(FiniteSpan, span)
@@ -154,11 +163,13 @@ class Schedule:
             # between intervals
             # 'between' refers to hours in the day, so this is basically just
             # another scheduling window constraint, but individualized per-task
-            event_time.between_constraint()
+            if event_time.task.between:
+                event_time.between_constraint()
 
             # by constraint
             # Same note here as for 'between'.
-            event_time.by_constraint()
+            if event_time.task.by:
+                event_time.by_constraint()
 
             # after constraint
             # Same note here as for 'between'.
@@ -171,6 +182,15 @@ class Schedule:
                 (event_times[other_task.name], bound)
                 for other_task, bound in event_time.task.not_within
             )
+
+            # no_pick_first
+            # (this is used by the 'next' feature)
+            if event_time.task.name in no_pick_first:
+                event_time.no_pick_first_constraint(
+                    other_event
+                    for other_event in event_times.values()
+                    if other_event.task.name != event_time.task.name
+                )
 
         # And, now for the magic!
         solver = cp_model.CpSolver()
@@ -299,41 +319,42 @@ class EventTime:
         self.model.AddBoolXOr(cons)
 
     def between_constraint(self) -> None:
-        if self.task.between is not None:
-            cons = []
-            daily_start = self.task.between[0]
-            daily_stop = self.task.between[1]
-            for i, day in enumerate(dates_between(self.span)):
-                start = int(datetime.combine(day, daily_start).timestamp())
-                stop = int(datetime.combine(day, daily_stop).timestamp())
-                start_cons = self.start_time > start
-                stop_cons = self.stop_time < stop
-                this_day = self.model.NewBoolVar(f"day_{i}_between_{self.task.name}")
-                self.model.Add(start_cons).OnlyEnforceIf(this_day)
-                self.model.Add(stop_cons).OnlyEnforceIf(this_day)
-                cons.append(this_day)
+        if self.task.between is None:
+            raise ValueError("Can't set a between constraint without specifying times")
+        cons = []
+        daily_start = self.task.between[0]
+        daily_stop = self.task.between[1]
+        for i, day in enumerate(dates_between(self.span)):
+            start = int(datetime.combine(day, daily_start).timestamp())
+            stop = int(datetime.combine(day, daily_stop).timestamp())
+            start_cons = self.start_time > start
+            stop_cons = self.stop_time < stop
+            this_day = self.model.NewBoolVar(f"day_{i}_between_{self.task.name}")
+            self.model.Add(start_cons).OnlyEnforceIf(this_day)
+            self.model.Add(stop_cons).OnlyEnforceIf(this_day)
+            cons.append(this_day)
+        if cons:
             self.model.AddBoolXOr(cons)
 
     def by_constraint(self) -> None:
-        if self.task.by:
-            days = []
-            for i, day in enumerate(dates_between(self.span)):
-                by_time = int(datetime.combine(day, self.task.by).timestamp())
-                this_day = self.model.NewBoolVar(f"day_{i}_by_{self.task.name}")
-                self.model.Add(self.stop_time < by_time).OnlyEnforceIf(this_day)
-                days.append(this_day)
+        if self.task.by is None:
+            raise ValueError("Can't set a between constraint without specifying times")
+        days = []
+        for i, day in enumerate(dates_between(self.span)):
+            by_time = int(datetime.combine(day, self.task.by).timestamp())
+            this_day = self.model.NewBoolVar(f"day_{i}_by_{self.task.name}")
+            self.model.Add(self.stop_time < by_time).OnlyEnforceIf(this_day)
+            days.append(this_day)
+        if days:
             self.model.AddBoolXOr(days)
 
     def after_constraint(self, other_times: Iterable["EventTime"]) -> None:
-        if self.task.after:
-            for other_time in other_times:
-                if other_time.is_pre_existing():
-                    other_time = cast(PreExistingEventTime, other_time)
-                    self.model.Add(
-                        self.start_time > int(other_time.stop_time.timestamp())
-                    )
-                else:
-                    self.model.Add(self.start_time > other_time.stop_time)
+        for other_time in other_times:
+            if other_time.is_pre_existing():
+                other_time = cast(PreExistingEventTime, other_time)
+                self.model.Add(self.start_time > int(other_time.stop_time.timestamp()))
+            else:
+                self.model.Add(self.start_time > other_time.stop_time)
 
     def not_within_constraint(
         self, other_times: Iterable[Tuple["EventTime", timedelta]]
@@ -404,6 +425,18 @@ class EventTime:
 
             self.model.Add(start_after).OnlyEnforceIf(event_is_first)
             self.model.Add(finish_before).OnlyEnforceIf(event_is_first.Not())
+
+    def no_pick_first_constraint(self, event_times: Iterable["EventTime"]):
+        cons = []
+        for other_time in event_times:
+            this_other_time_is_first = self.model.NewBoolVar(
+                f"npf_{self.task.name}_to_{other_time.task.name}"
+            )
+            self.model.Add(self.start_time > other_time.start_time).OnlyEnforceIf(
+                this_other_time_is_first
+            )
+            cons.append(this_other_time_is_first)
+        self.model.AddBoolOr(cons)
 
     def is_pre_existing(self):
         return False
