@@ -8,7 +8,7 @@ class MyDailySchedule(DailySchedule):
     def schedule(self):
         # These are the defaults, but I'm including them for documentation
         self.day_start = time(hour=8)
-        self.day_end = time(hour=22)
+        self.day_end = time(hour=23)
 
         # Take medicine
         medicine = Task("Take my medicine", duration=timedelta(minutes=10))

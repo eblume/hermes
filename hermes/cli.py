@@ -185,7 +185,7 @@ def clear(context, yes):
             "When clearing a schedule, you must specify one (and only one) calendar."
         )
     gcal = GoogleCalendarTimeSpan(
-        client=context.gcal.client, calendar_id=context.gcal.target_calendar_id
+        client=context.gcal.client, calendar_id=context.target_calendar_id
     )
     click.secho("Events:")
     for event in gcal.iter_tags():
@@ -246,6 +246,19 @@ def whatsnext(context, schedules, slots):
 
     unfeasible_count = 0
     while len(slot_list) < slots:
+        if unfeasible_count >= 3:
+            if not slot_list:
+                click.secho(
+                    "Sorry! Could not find a feasible next event. Try relaxing your constraints?",
+                    bold=True,
+                )
+                click.secho("Nothing was written to your calendar!")
+                sys.exit(3)
+            break
+
+        if not schedules:
+            # "degrade gracefully", as per click's suggestion
+            break
         # TODO - categories
         schedule_name = random.choice(
             list(schedules.keys())
@@ -263,23 +276,22 @@ def whatsnext(context, schedules, slots):
             )
         except ValueError:
             unfeasible_count += 1
-            if unfeasible_count >= 3:
-                if not slot_list:
-                    click.secho(
-                        "Sorry! Could not find a feasible next event. Try relaxing your constraints?",
-                        bold=True,
-                    )
-                    click.secho("Nothing was written to your calendar!")
-                    sys.exit(3)
-                break
             continue
 
-        slot_list.append(new_events[0])
-        slot_schedules[new_events[0].name] = new_events
+        if new_events:
+            slot_list.append(new_events[0])
+            slot_schedules[new_events[0].name] = new_events
+        else:
+            unfeasible_count += 1
 
     # Display choices
-    if slot_list:
-        click.secho("Choices:", bold=True)
+    if not slot_list:
+        click.secho(
+            "No valid events could be found for this period and these schedules.",
+            bold=True,
+        )
+        return
+    click.secho("Choices:", bold=True)
     for i, event in enumerate(slot_list):
         click.secho(
             f"\t{i}:\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
@@ -287,9 +299,8 @@ def whatsnext(context, schedules, slots):
         # TODO - show whole plan, somehow? Ugly UI.
 
     choice = click.prompt(
-        "Please enter your choice:",
+        "Please enter your choice (ctrl+c to cancel):",
         default=0,
-        confirmation_prompt=True,
         type=click.Choice(list(str(i) for i in range(len(slot_list)))),
     )
 
