@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import abc
 import datetime as dt
-from typing import Iterable, Optional
+from typing import cast, Iterable, Optional
 
 import attr
 from dateutil.tz import tzlocal
@@ -85,6 +85,27 @@ class Span(Spannable):
         )
         stop = start + dt.timedelta(days=1, microseconds=-1)
         return cls(begins_at=start, finish_at=stop)
+
+    def dates_between(self) -> Iterable[dt.date]:
+        if not self.is_finite():
+            raise ValueError("Span must be concrete and finite")
+        begins_at: dt.datetime = cast(dt.datetime, self.begins_at)
+        finish_at: dt.datetime = cast(dt.datetime, self.finish_at)
+
+        if begins_at.tzinfo != finish_at.tzinfo:
+            finish_at = finish_at.astimezone(tz=begins_at.tzinfo)
+
+        day: dt.date = begins_at.date()
+        while (
+            dt.datetime.combine(
+                day,
+                dt.time(hour=0, minute=0, second=0, microsecond=0),
+                tzinfo=begins_at.tzinfo,
+            )
+            < finish_at
+        ):
+            yield day
+            day += dt.timedelta(days=1)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)

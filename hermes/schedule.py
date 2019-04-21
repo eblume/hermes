@@ -1,274 +1,260 @@
 # -*- coding: utf-8 -*-
-from datetime import date, datetime, time, timedelta, timezone
-from typing import cast, Dict, Iterable, List, Optional, Set, Tuple
+from datetime import datetime, time, timedelta, timezone
+from typing import cast, Dict, Iterable, List, NewType, Optional, Set, Tuple, TypeVar
 
 from dateutil.tz import tzlocal
 from ortools.sat.python import cp_model
 
 from .span import FiniteSpan, Span
 from .tag import Tag
+from .timespan import BaseTimeSpan, TimeSpan
 
 
 class Schedule:
-    """Class that is used to build (via subclassing) 'schedules'.
-
-    Schedules here are 'blueprints' that can be given a Span, and will generate
-    tags representing events such that certain constraints (defined by the
-    subclasser) are met. These tags may then be used to populate a timespan -
-    the caller does this.
-
-    **All concrete subclasses MUST implement a `schedule` method.** This
-    method is called to actually create the scheduling constraints at
-    runtime. A 'concrete' schedule is a subclass of Schedule that will itself
-    be instantiated, as opposed to 'virtual' schedules (of which Schedule is
-    one) that are intended to be subclassed. 'Virtual' schedules MUST NOT
-    implement a `schedule` method, or else Hermes will attempt to use them
-    as an actual schedule!
-
-    To put it another way: All children-classes of Schedule that implement
-    a `schedule` method WILL be scheduled. This behavior is enforced by the
-    CLI of hermes, rather than the package itself, so if you are not using
-    the CLI then you don't 'need' to do this, but you'll still have
-    to build an actual schedule at some point.
-
-    Finally, note that you can override `NAME` as an attribute on a schedule
-    in order to provide a different name to the tagger. This changes, at
-    minimum, the leaf Category (which will be set to `NAME` or the schedule's
-    class name, in that order).
-    """
-
     NAME: Optional[str] = None
+    DEFAULT_DURATION = timedelta(minutes=30)
 
     def __init__(self, **kwargs):
         if kwargs:
             raise ValueError("Unrecognized kwargs", kwargs)
-        self.tasks: Dict[str, "Task"] = {}
-        self.model: cp_model.CpModel = cp_model.CpModel()
-        self._pre_existing_events: List[Tag] = []
-        self._skip_existing: bool = True
+        self.model = ConstraintModel()
+        self.events: Dict["EventName", "Event"] = {}
 
-    def event_windows(self, overall: Span) -> Iterable[Span]:
-        """Generate all valid scheduling windows over the given span.
-
-        This base implementation simply yields the entire span of the schedule all at
-        once, but subclasses can change this behavior.
-
-        This is so that schedules can be configured to only schedule events
-        during certain windows inside of their overall span.
-
-        Importantly, the schedule is _stretched_ across all windows! That is to
-        say, this does not _repeat_ the schedule in each window. If you would
-        like to repeat the schedule, then simply apply the schedule seperately
-        for each intended window. You can even use this method in a recipe to
-        do that:
-
-            foo = MySchedule()  # implements a custom `event_windows()`
-            for window in foo.event_windows():
-                events = foo.populate(window)  # foo now 'repeated' across all windows
-
-        However, note that in order for this to work, `event_windows()` must
-        be designed to 'terminate recursively', because `populate()` itself
-        uses `event_windows()`. Most commonly, you would want each windows'
-        individual `event_windows()` subdivision to just return itself. See
-        `DailySchedule` for a basic, common example.
-        """
+    def event_windows(self, overall: FiniteSpan) -> Iterable[FiniteSpan]:
         yield overall
 
-    def task(
+    def add_event(
         self,
-        task: "Task",
+        name: str,
+        duration: Optional[timedelta] = None,
+        optional: bool = True,
         between: Optional[Tuple[time, time]] = None,
-        after: Optional["Task"] = None,
+        after: Optional["Event"] = None,
         by: Optional[time] = None,
-    ):
-        if task.name in self.tasks:
-            raise ValueError("Task names must be unique")
-        self.tasks[task.name] = task
+    ) -> "Event":
+        name = cast(EventName, name)
+        if name in self.events:
+            raise ValueError(f"Already have a defined event called {name}")
+
+        if duration is None:
+            duration = self.DEFAULT_DURATION
+
+        start_time = self.model.make_var(f"{name}_start_time")
+        stop_time = self.model.make_var(f"{name}_stop_time")
+        is_present = self.model.make_var(f"{name}_is_present", boolean=True)
+        if not optional:
+            self.model.add(is_present == 1)
+
+        interval = self.model.make_interval(
+            start_time, duration, stop_time, is_present, f"{name}_interval"
+        )
+
+        event = Event(name, start_time, stop_time, is_present, interval)
+        self.events[name] = event
 
         if between is not None:
-            task.between = between
+            one, two = between
+            if one.tzinfo is None:
+                one.replace(tzinfo=tzlocal())
+            if two.tzinfo is None:
+                two.replace(tzinfo=tzlocal())
+            event._between = (one, two)
 
         if by is not None:
             if between is not None:
                 raise ValueError("Cannot specify both `by` and `between`")
-            task.by = by
+            if by.tzinfo is None:
+                by = by.replace(tzinfo=tzlocal())
+            event._by = by
 
         if after is not None:
-            task.after.append(after)
+            if after.name not in self.events:
+                raise ValueError("Somehow, this event doesn't exist yet.")
+            event._after.append(after)
 
-    def pre_existing_events(
-        self, events: Iterable[Tag], preserve_schedule: bool = True
-    ) -> None:
-        """Tell the scheduler about these pre-existing events. It will not
-        schedule any overlapping events during these events.
+        return event
 
-        If `preserve_schedule` is True (default), events that are already scheduled
-        that show up in the pending schedule will not be rescheduled
-
-        Repeated calls to this method just overwrite past calls.
-        """
-        self._pre_existing_events = list(events)
-        self._preserve_schedule = preserve_schedule
-
-    def not_within(self, task_a: "Task", task_b: "Task", bound: timedelta) -> None:
-        """task_a and task_b must both not start or stop within `bound` of eachother."""
-        task_a.not_within.append((task_b, bound))
-
-    def objective(self, event_times) -> None:
-        """Register an objective function. By default, the objective is to
-        maximize the number of tasks scheduled. Subclass to change. Called
-        by `populate`."""
-        self.model.Maximize(
-            sum(
-                event.is_present
-                for event in event_times.values()
-                if not event.is_pre_existing()
-            )
-        )
+    def not_within(self, event_a: "Event", event_b: "Event", bound: timedelta) -> None:
+        event_a._not_within.append((event_b, bound))
 
     def populate(
-        self, span: Span, no_pick_first: Optional[Set[str]] = None
-    ) -> List[Tag]:
-        """no_pick_first should be a list of task names, which - if provided - will
-        NOT be scheduled first.
-        """
+        self,
+        span: FiniteSpan,
+        pre_existing_timespans: Optional[Iterable[BaseTimeSpan]] = None,
+        no_pick_first: Optional[Iterable[str]] = None,
+    ) -> TimeSpan:
         if no_pick_first is None:
-            no_pick_first = set()
-        no_pick_first = cast(Set[str], no_pick_first)
+            _no_pick_first: Set[EventName] = set()
+        else:
+            _no_pick_first = set(EventName(npf) for npf in no_pick_first)
 
-        if not span.is_finite():
-            raise ValueError("Schedules must have concrete, finite spans.")
-        span = cast(FiniteSpan, span)
+        # Establish pre-existing event boundaries
+        if pre_existing_timespans:
+            for timespan in pre_existing_timespans:
+                for tag in timespan.iter_tags():
+                    tag_name = EventName(tag.name)
+                    if tag_name in self.events:
+                        event = self.events[tag_name]
+                    else:
+                        event = self.add_event(
+                            tag_name, tag.span.duration, optional=False
+                        )
+                        event._dont_schedule = True
+                    event.pin_to_tag(self.model, tag)
 
-        event_times: Dict[str, EventTime] = {}
+        # Constrain the events
+        for event in self.events.values():
+            self.constrain(event, span, event.name in _no_pick_first)
 
-        for event in self._pre_existing_events:
-            if event.name in event_times:
-                other_event = cast(PreExistingEventTime, event_times[event.name])
-                other_event.duplicate_event(event)
-            else:
-                event_times[event.name] = PreExistingEventTime(event)
-
-        for task in self.tasks.values():
-            if task.name in event_times and self._preserve_schedule:
-                continue
-            event_times[task.name] = EventTime(self.model, span, task)
-
-        # No time overlapping
-        self.model.AddNoOverlap(
-            event_time.interval
-            for event_time in event_times.values()
-            if not event_time.is_pre_existing()
-        )
+        # No interval overlapping (yet)
+        self.model.add_no_overlap(self.events.values())
 
         # Set the objective
-        self.objective(event_times)
+        self.objective()
 
-        # Additional constraints
-        for event_time in event_times.values():
-            if event_time.is_pre_existing():
-                continue  # We can't constrain a pre-existing event... it exists already! :)
+        # Do the magic
+        return self.make_timespan(self.model.solve())
 
-            # event windows - pick one, and be in it.
-            event_time.windows_constraint(self.event_windows(span))
-
-            # pre-existing events
-            event_time.pre_existing_constraint(self._pre_existing_events)
-
-            # between intervals
-            # 'between' refers to hours in the day, so this is basically just
-            # another scheduling window constraint, but individualized per-task
-            if event_time.task.between:
-                event_time.between_constraint()
-
-            # by constraint
-            # Same note here as for 'between'.
-            if event_time.task.by:
-                event_time.by_constraint()
-
-            # after constraint
-            # Same note here as for 'between'.
-            event_time.after_constraint(
-                event_times[other_task.name] for other_task in event_time.task.after
-            )
-
-            # not-within bounds
-            event_time.not_within_constraint(
-                (event_times[other_task.name], bound)
-                for other_task, bound in event_time.task.not_within
-            )
-
-            # no_pick_first
-            # (this is used by the 'next' feature)
-            if event_time.task.name in no_pick_first:
-                event_time.no_pick_first_constraint(
-                    other_event
-                    for other_event in event_times.values()
-                    if not other_event.is_pre_existing()
-                    and other_event.task.name != event_time.task.name
+    def make_timespan(self, solver: cp_model.CpSolver) -> TimeSpan:
+        return TimeSpan(
+            set(
+                Tag(
+                    name=event.name,
+                    # TODO - category
+                    valid_from=datetime.fromtimestamp(
+                        solver.Value(event.start_time), timezone.utc
+                    ),
+                    valid_to=datetime.fromtimestamp(
+                        solver.Value(event.stop_time), timezone.utc
+                    ),
                 )
-
-        # And, now for the magic!
-        solver = cp_model.CpSolver()
-        status = solver.Solve(self.model)
-
-        if status not in {cp_model.FEASIBLE, cp_model.OPTIMAL}:
-            # TODO - much better error handling.
-            raise ValueError("Non-feasible scheduling problem, uhoh!")
-
-        return [
-            Tag(
-                name=event_time.task.name,
-                # TODO - category,
-                valid_from=datetime.fromtimestamp(
-                    solver.Value(event_time.start_time), timezone.utc
-                ),
-                valid_to=datetime.fromtimestamp(
-                    solver.Value(event_time.stop_time), timezone.utc
-                ),
+                for event in self.events.values()
+                if not event._dont_schedule and solver.Value(event.is_present) == 1
             )
-            for event_time in event_times.values()
-            if not event_time.is_pre_existing()
-            and solver.Value(event_time.is_present) == 1
-        ]
+        )
+
+    def constrain(self, event: "Event", span: FiniteSpan, no_pick_first: bool) -> None:
+        if no_pick_first:
+            event.no_pick_first(self.model, self.events.values())
+        event.choose_window(self.model, self.event_windows(span))
+        event.not_within(self.model)
+        event.by(self.model, span)
+        event.between(self.model, span)
+        event.after(self.model)
+
+    def objective(self) -> None:
+        """Default objective: schedule as many optional events as possible"""
+        self.model.maximize(self.events.values())
 
 
-class Task:
+EventType = TypeVar("EventType", bound="Event")
+EventName = NewType("EventName", str)
+
+
+class Event:
     def __init__(
         self,
-        name: str,
-        duration: timedelta = timedelta(minutes=30),
-        optional: bool = True,
+        name: EventName,
+        start_time: cp_model.IntVar,
+        stop_time: cp_model.IntVar,
+        is_present: cp_model.IntVar,
+        interval: cp_model.IntVar,
     ):
-        self.name = name
-        self.duration = duration
-        self.between: Optional[Tuple[time, time]] = None
-        self.by: Optional[time] = None
-        self.not_within: List[Tuple["Task", timedelta]] = []
-        self.after: List["Task"] = []
-        self.optional = optional
+        self.name = EventName(name)
+        self.start_time = start_time
+        self.stop_time = stop_time
+        self.is_present = is_present
+        self.interval = interval
 
+        # internal flags for things like scheduling constraints
+        self._dont_schedule = False
+        self._pinned = False
+        self._not_within: List[Tuple["Event", timedelta]] = []
+        self._by: Optional[time] = None
+        self._between: Optional[Tuple[time, time]] = None
+        self._after: List["Event"] = []
 
-def dates_between(span: Span) -> Iterable[date]:
-    if not span.is_finite():
-        raise ValueError("Span must be concrete and finite")
-    begins_at: datetime = cast(datetime, span.begins_at)
-    finish_at: datetime = cast(datetime, span.finish_at)
+    def not_within(self, model: "ConstraintModel") -> None:
+        for other_time, bound in self._not_within:
+            gap = int(bound.total_seconds())
+            first_stop = model.min_equality(self.stop_time, other_time.stop_time)
+            last_start = model.max_equality(self.start_time, other_time.start_time)
+            model.add(last_start - first_stop >= gap, sentinel=self.is_present)
 
-    if begins_at.tzinfo != finish_at.tzinfo:
-        finish_at = finish_at.astimezone(tz=begins_at.tzinfo)
+    def by(self, model: "ConstraintModel", span: FiniteSpan) -> None:
+        if self._by is not None:
+            days = []
+            for i, day in enumerate(span.dates_between()):
+                by_time = int(datetime.combine(day, self._by).timestamp())
+                this_day = model.make_var(f"day_{i}_by_{self.name}", boolean=True)
+                model.add(self.stop_time < by_time, sentinel=this_day)
+                days.append(this_day)
+            if days:
+                model.add(sum(days) == 1, sentinel=self.is_present)
 
-    day: date = begins_at.date()
-    while (
-        datetime.combine(
-            day,
-            time(hour=0, minute=0, second=0, microsecond=0),
-            tzinfo=begins_at.tzinfo,
-        )
-        < finish_at
-    ):
-        yield day
-        day += timedelta(days=1)
+    def between(self, model: "ConstraintModel", span: Span) -> None:
+        if self._between is not None:
+            cons = []
+            daily_start, daily_stop = self._between
+            for i, day in enumerate(span.dates_between()):
+                start = int(datetime.combine(day, daily_start).timestamp())
+                stop = int(datetime.combine(day, daily_stop).timestamp())
+                start_cons = self.start_time > start
+                stop_cons = self.stop_time < stop
+                this_day = model.make_var(f"day_{i}_between_{self.name}", boolean=True)
+                model.add(start_cons, sentinel=this_day)
+                model.add(stop_cons, sentinel=this_day)
+                cons.append(this_day)
+            if cons:
+                model.add(sum(cons) == 1, sentinel=self.is_present)
+
+    def after(self, model: "ConstraintModel") -> None:
+        for other_event in self._after:
+            model.add(self.start_time > other_event.stop_time, sentinel=self.is_present)
+
+    def pin_to_tag(self, model: "ConstraintModel", tag: Tag) -> None:
+        if not self._pinned:
+            model.add(
+                self.start_time == int(cast(datetime, tag.valid_from).timestamp())
+            )
+            # In theory, the interval duration should handle the finish_at portion...
+            # model.add(self.stop_time == int(cast(datetime, tag.valid_to).timestamp()))
+            self._pinned = True
+        # We only allow the first 'pin' - other 'pins' might be an error but might just
+        # be weird cruft in the calendar. Either way, we don't do it again.
+
+    def no_pick_first(
+        self, model: "ConstraintModel", events: Iterable["Event"]
+    ) -> None:
+        constraints = []
+        for event in events:
+            if event.name == self.name:
+                continue
+            other_is_first = model.make_var(
+                f"npf_{self.name}_to_{event.name}", boolean=True
+            )
+            model.add(self.start_time > event.start_time, sentinel=other_is_first)
+            constraints.append(other_is_first)
+        if constraints:
+            model.add(sum(constraints) > 0, sentinel=self.is_present)
+
+    def choose_window(
+        self, model: "ConstraintModel", windows: Iterable[FiniteSpan]
+    ) -> None:
+        constraints = []
+        for i, window in enumerate(windows):
+            start_cons = self.start_time > int(
+                cast(datetime, window.begins_at).timestamp()
+            )
+            stop_cons = self.stop_time < int(
+                cast(datetime, window.finish_at).timestamp()
+            )
+            this_window = model.make_var(f"{self.name}_window_{i}", boolean=True)
+            model.add(start_cons, sentinel=this_window)
+            model.add(stop_cons, sentinel=this_window)
+            constraints.append(this_window)
+        if constraints:
+            model.add(sum(constraints) == 1, sentinel=self.is_present)
 
 
 class DailySchedule(Schedule):
@@ -277,238 +263,121 @@ class DailySchedule(Schedule):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.day_start = time(hour=8)  # if needed, just overwrite these directly.
+        self.day_start = time(hour=7)  # if needed, just overwrite these directly.
         self.day_end = time(hour=22)
 
-    def event_windows(self, overall: Span) -> Iterable[Span]:
-        for day in dates_between(overall):
+    def event_windows(self, overall: FiniteSpan) -> Iterable[FiniteSpan]:
+        for day in overall.dates_between():
             start = datetime.combine(
                 day, self.day_start, tzinfo=self.day_start.tzinfo or tzlocal()
             )
             stop = datetime.combine(
                 day, self.day_end, tzinfo=self.day_end.tzinfo or tzlocal()
             )
-            yield Span(
+            yield FiniteSpan(
                 begins_at=max(start, overall.begins_at),
                 finish_at=min(stop, overall.finish_at),
             )
 
 
-class EventTime:
-    """Encapsulation for constraint variables representing event times."""
+class ConstraintModel:
+    """Wrapper for cp_model from google or-tools, which is a CP-SAT general purpose solver."""
 
-    def __init__(self, model: cp_model.CpModel, span: FiniteSpan, task: Task) -> None:
-        self.start_time: cp_model.IntVar = model.NewIntVar(
-            int(span.begins_at.timestamp()),  # upper_bound
-            int(span.finish_at.timestamp()),  # lower_bound
-            task.name,
+    def __init__(self):
+        self._model = cp_model.CpModel()
+        self._variables: Dict[str, cp_model.IntVar] = {}
+
+    def make_var(self, name: str, boolean: bool = False) -> cp_model.IntVar:
+        if boolean:
+            variable = self._model.NewBoolVar(name)
+        else:
+            variable = self._model.NewIntVar(0, cp_model.INT32_MAX * 32, name)
+        self._variables[name] = variable
+        return variable
+
+    def make_interval(
+        self,
+        start: cp_model.IntVar,
+        duration: timedelta,
+        stop: cp_model.IntVar,
+        is_present: cp_model.IntVar,
+        name: str,
+    ) -> cp_model.IntVar:
+        variable = self._model.NewOptionalIntervalVar(
+            start, int(duration.total_seconds()), stop, is_present, name
         )
+        self._variables[name] = variable
+        return variable
 
-        self.stop_time: cp_model.IntVar = model.NewIntVar(
-            int(span.begins_at.timestamp()),  # upper_bound
-            int(span.finish_at.timestamp()),  # lower_bound
-            task.name,
-        )
-
-        self.is_present: cp_model.IntVar = model.NewBoolVar(f"is_present_{task.name}")
-
-        self.interval: cp_model.IntVar = model.NewOptionalIntervalVar(
-            self.start_time,
-            int(task.duration.total_seconds()),
-            self.stop_time,
-            self.is_present,
-            task.name,
-        )
-        if not task.optional:
-            model.Add(self.is_present == 1)
-
-        # and some backrefs, because why not, and GC is 'cheap'
-        self.model = model
-        self.span = span
-        self.task = task
-
-    def windows_constraint(self, event_windows: Iterable[Span]) -> None:
-        cons = []
-        for i, window in enumerate(event_windows):
-            start_cons = self.start_time > int(
-                cast(datetime, window.begins_at).timestamp()
-            )
-            stop_cons = self.stop_time < int(
-                cast(datetime, window.finish_at).timestamp()
-            )
-            this_window = self.model.NewBoolVar(f"{self.task.name}_window_{i}")
-            self.model.Add(start_cons).OnlyEnforceIf(this_window)
-            self.model.Add(stop_cons).OnlyEnforceIf(this_window)
-            cons.append(this_window)
-
-        if not cons:
-            raise ValueError("All schedules must have at least one window")
-
-        self.model.Add(sum(cons) == 1).OnlyEnforceIf(self.is_present)
-
-    def between_constraint(self) -> None:
-        if self.task.between is None:
-            raise ValueError("Can't set a between constraint without specifying times")
-        cons = []
-        daily_start = self.task.between[0]
-        daily_stop = self.task.between[1]
-        for i, day in enumerate(dates_between(self.span)):
-            start = int(datetime.combine(day, daily_start).timestamp())
-            stop = int(datetime.combine(day, daily_stop).timestamp())
-            start_cons = self.start_time > start
-            stop_cons = self.stop_time < stop
-            this_day = self.model.NewBoolVar(f"day_{i}_between_{self.task.name}")
-            self.model.Add(start_cons).OnlyEnforceIf(this_day)
-            self.model.Add(stop_cons).OnlyEnforceIf(this_day)
-            cons.append(this_day)
-        if cons:
-            self.model.Add(sum(cons) == 1).OnlyEnforceIf(self.is_present)
-
-    def by_constraint(self) -> None:
-        if self.task.by is None:
-            raise ValueError("Can't set a between constraint without specifying times")
-        days = []
-        for i, day in enumerate(dates_between(self.span)):
-            by_time = int(datetime.combine(day, self.task.by).timestamp())
-            this_day = self.model.NewBoolVar(f"day_{i}_by_{self.task.name}")
-            self.model.Add(self.stop_time < by_time).OnlyEnforceIf(this_day)
-            days.append(this_day)
-        if days:
-            self.model.Add(sum(days) == 1).OnlyEnforceIf(self.is_present)
-
-    def after_constraint(self, other_times: Iterable["EventTime"]) -> None:
-        for other_time in other_times:
-            if other_time.is_pre_existing():
-                other_time = cast(PreExistingEventTime, other_time)
-                cons = self.model.Add(
-                    self.start_time > int(other_time.stop_time.timestamp())
-                )
-            else:
-                cons = self.model.Add(self.start_time > other_time.stop_time)
-            cons.OnlyEnforceIf(self.is_present)
-
-    def not_within_constraint(
-        self, other_times: Iterable[Tuple["EventTime", timedelta]]
+    def add(
+        self,
+        expression: cp_model.LinearExpression,
+        sentinel: Optional[cp_model.IntVar] = None,
     ) -> None:
-        for other_time, bound in other_times:
-            gap = int(bound.total_seconds())
-            if other_time.is_pre_existing():
-                other_time = cast(PreExistingEventTime, other_time)
-                cons = []
-                for i, event in enumerate(other_time.events):
-                    smallest_stop = self.model.NewIntVar(
-                        int(self.span.begins_at.timestamp()),
-                        int(self.span.finish_at.timestamp()),
-                        f"smallest_stop_{self.task.name}_{event.name}_preexist_{i}",
-                    )
-                    largest_start = self.model.NewIntVar(
-                        int(self.span.begins_at.timestamp()),
-                        int(self.span.finish_at.timestamp()),
-                        f"largest_start_{self.task.name}_{event.name}_preexist_{i}",
-                    )
-                    this_preexisting_event = self.model.NewBoolVar(
-                        f"nwi_preexist_{i}_{self.task.name}"
-                    )
+        constraint = self._model.Add(expression)
+        if sentinel is not None:
+            constraint = constraint.OnlyEnforceIf(sentinel)
+        # TODO - return type?
 
-                    self.model.AddMinEquality(
-                        smallest_stop,
-                        [self.stop_time, int(other_time.stop_time.timestamp())],
-                    )
-                    self.model.AddMaxEquality(
-                        largest_start,
-                        [self.start_time, int(other_time.start_time.timestamp())],
-                    )
+    def add_no_overlap(self, events: Iterable["Event"]) -> None:
+        self._model.AddNoOverlap(event.interval for event in events)
 
-                    self.model.Add(largest_start - smallest_stop > gap).OnlyEnforceIf(
-                        this_preexisting_event
-                    )
-                    cons.append(this_preexisting_event)
-                self.model.Add(sum(cons) == 1).OnlyEnforceIf(self.is_present)
-            else:
-                smallest_stop = self.model.NewIntVar(
-                    int(self.span.begins_at.timestamp()),
-                    int(self.span.finish_at.timestamp()),
-                    f"smallest_stop_{self.task.name}_{other_time.task.name}",
-                )
-                largest_start = self.model.NewIntVar(
-                    int(self.span.begins_at.timestamp()),
-                    int(self.span.finish_at.timestamp()),
-                    f"largest_start_{self.task.name}_{other_time.task.name}",
-                )
-                self.model.AddMinEquality(
-                    smallest_stop, [self.stop_time, other_time.stop_time]
-                )
-                self.model.AddMaxEquality(
-                    largest_start, [self.start_time, other_time.start_time]
-                )
+    def solve(self, with_solution_tracker=False) -> cp_model.CpSolver:
+        solver = cp_model.CpSolver()
+        if with_solution_tracker:
+            solution_handler = ConstraintModelSolutionTracker(self._variables.values())
+            status = solver.SolveWithSolutionCallback(self._model, solution_handler)
+        else:
+            status = solver.Solve(self._model)
 
-                self.model.Add(largest_start - smallest_stop > gap).OnlyEnforceIf(
-                    self.is_present
-                )
-
-    def pre_existing_constraint(self, events: Iterable[Tag]) -> None:
-        for i, event in enumerate(events):
-            start_after = self.start_time > int(
-                cast(datetime, event.valid_to).timestamp()
+        if status not in {cp_model.FEASIBLE, cp_model.OPTIMAL}:
+            # TODO - custom error reporting
+            raise ValueError(
+                f"Non-feasible scheduling problem status: {solver.StatusName(status)}"
             )
-            finish_before = self.stop_time < int(
-                cast(datetime, event.valid_from).timestamp()
-            )
-            event_is_first = self.model.NewBoolVar(f"preexist_{i}_{self.task.name}")
+        return solver
 
-            self.model.Add(start_after).OnlyEnforceIf([event_is_first, self.is_present])
-            self.model.Add(finish_before).OnlyEnforceIf(
-                [event_is_first.Not(), self.is_present]
-            )
+    def minimize(self, events: Iterable["Event"]) -> None:
+        self._model.Minimize(sum(event.is_present for event in events))
 
-    def no_pick_first_constraint(self, event_times: Iterable["EventTime"]):
-        cons = []
-        for other_time in event_times:
-            this_other_time_is_first = self.model.NewBoolVar(
-                f"npf_{self.task.name}_to_{other_time.task.name}"
-            )
-            self.model.Add(self.start_time > other_time.start_time).OnlyEnforceIf(
-                this_other_time_is_first
-            )
-            cons.append(this_other_time_is_first)
-        self.model.AddBoolOr(cons).OnlyEnforceIf(self.is_present)
+    def maximize(self, events: Iterable["Event"]) -> None:
+        self._model.Maximize(sum(event.is_present for event in events))
 
-    def is_pre_existing(self):
-        return False
+    def min_equality(
+        self, first: cp_model.IntVar, second: cp_model.IntVar
+    ) -> cp_model.IntVar:
+        name = f"min({first}, {second})"
+        variable = self.make_var(name)
+        self._model.AddMinEquality(variable, [first, second])
+        self._variables[name] = variable
+        return variable
+
+    def max_equality(
+        self, first: cp_model.IntVar, second: cp_model.IntVar
+    ) -> cp_model.IntVar:
+        name = f"max({first}, {second})"
+        variable = self.make_var(name)
+        self._model.AddMaxEquality(variable, [first, second])
+        self._variables[name] = variable
+        return variable
 
 
-class PreExistingEventTime(EventTime):
-    def __init__(self, event: Tag):
-        self.events = [event]
+class ConstraintModelSolutionTracker(cp_model.CpSolverSolutionCallback):
+    """Helper class for debugging purposes"""
 
-    def is_pre_existing(self):
-        return True
+    def __init__(self, variables: Iterable[cp_model.IntVar]) -> None:
+        super().__init__()
+        self.variables = variables
+        self.solution_count = 0
+        self.updates: List[Dict] = []
 
-    def duplicate_event(self, event):
-        # Unlike Hermes scheduled events, pre-existing events don't necessarily
-        # have unique names. This facilty allows for that.
-        self.events.append(event)
-
-    @property
-    def start_time(self) -> datetime:
-        return min(cast(datetime, e.valid_from) for e in self.events)
-
-    @property
-    def stop_time(self) -> datetime:
-        return max(cast(datetime, e.valid_to) for e in self.events)
-
-    @property
-    def span(self) -> FiniteSpan:  # type: ignore
-        return FiniteSpan(begins_at=self.start_time, finish_at=self.stop_time)
-
-    @property
-    def interval(self):  # type: ignore
-        raise NotImplementedError("Not implemented for pre-existing events!")
-
-    @property
-    def task(self):  # type: ignore
-        raise NotImplementedError("Not implemented for pre-existing events!")
-
-    @property
-    def model(self):  # type: ignore
-        raise NotImplementedError("Not implemented for pre-existing events!")
+    def on_solution_callback(self):
+        update = {
+            "solution_count": self.solution_count,
+            "objective_value": self.ObjectiveValue(),
+            "variables": {
+                variable: self.Value(variable) for variable in self.variables
+            },
+        }
+        self.updates.append(update)
+        self.solution_count += 1

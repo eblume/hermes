@@ -206,9 +206,21 @@ def clear(context, yes):
 @click.option(
     "--slots", type=int, default=5, help="The number of events to choose from."
 )
+@click.option(
+    "--check-calendar",
+    default=None,
+    help="Check this calendar first and don't schedule events on top of it.",
+    multiple=True,
+)
+@click.option(
+    "--check-calendar-id",
+    default=None,
+    help="Check this calendar first and don't schedule events on top of it.",
+    multiple=True,
+)
 @click.argument("schedules", type=click.Path(exists=True), nargs=-1)
 @pass_call_context
-def whatsnext(context, schedules, slots):
+def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
     if context.target_calendar_id is None:
         raise click.UsageError(
             "When clearing a schedule, you must specify one (and only one) calendar."
@@ -240,6 +252,17 @@ def whatsnext(context, schedules, slots):
             "Your target date range for scheduling must be in the future."
         )
 
+    pre_existing_calendars = list(check_calendar_id)
+    for calendar_name in check_calendar:
+        pre_existing_calendars.append(
+            context.gcal.client.calendar_by_name(calendar_name)["id"]
+        )
+
+    pre_existing_events = []
+    for calendar_id in set(pre_existing_calendars):
+        for event in context.gcal.client.load_gcal(calendar_id).iter_tags():
+            pre_existing_events.append(event)
+
     span = Span(
         begins_at=max(context.gcal.begins_at, now), finish_at=context.gcal.finish_at
     )
@@ -265,9 +288,8 @@ def whatsnext(context, schedules, slots):
         )  # TODO: random? or in order? or somehow all-together? Hmm.
         schedule = schedules[schedule_name]()
         schedule.schedule()
-
-        if past_events:
-            schedule.pre_existing_events(past_events)
+        if pre_existing_events or past_events:
+            schedule.pre_existing_events(pre_existing_events + past_events)
 
         try:
             new_events = sorted(
@@ -297,6 +319,8 @@ def whatsnext(context, schedules, slots):
             f"\t{i}:\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
         )
         # TODO - show whole plan, somehow? Ugly UI.
+        for j, other in enumerate(slot_schedules[slot_list[i].name]):
+            click.secho(f"\t\t- {j}:\t {other.name}")
 
     choice = click.prompt(
         "Please enter your choice (ctrl+c to cancel):",
