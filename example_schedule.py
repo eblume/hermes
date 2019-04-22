@@ -7,7 +7,7 @@ from hermes.schedule import DailySchedule
 class MyDailySchedule(DailySchedule):
     def schedule(self):
         # There are defaults, but I'm including them for documentation
-        self.day_start = time(hour=8)
+        self.day_start = time(hour=7)
         self.day_end = time(hour=23)
 
         # Take medicine

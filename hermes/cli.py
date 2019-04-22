@@ -7,14 +7,13 @@
 # of code just to get the type system to quiet down...
 
 import configparser
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import partial
 from importlib.util import module_from_spec, spec_from_file_location
 import inspect
 from operator import attrgetter
 from pathlib import Path
 import random
-import sys
 from typing import Any, Dict, Optional
 
 from appdirs import user_config_dir
@@ -22,9 +21,8 @@ import click
 from dateutil.tz import tzlocal
 
 from .clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
-from .schedule import dates_between, Schedule
+from .schedule import Schedule
 from .span import Span
-from .tag import Category
 from .timespan import date_parse
 
 
@@ -87,7 +85,7 @@ def cli(ctx, debug, config):
 @click.option(
     "--today",
     is_flag=True,
-    help="Shortcut for --start-date and --finish-date to match the current local day.",
+    help="Shortcut for --start-date and --finish-date to match the current local day. Chosen by default when no other range is given.",
 )
 @click.option(
     "--tomorrow",
@@ -121,9 +119,17 @@ def calendars(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
         ) + timedelta(days=1)
         stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
+    elif start_date and finish_date:
+        start = date_parse(start_date)
+        stop = date_parse(finish_date)
+    elif start_date or finish_date:
+        context.Fail("You must specify both a start and finish date.")
     else:
-        start = date_parse(start_date) if start_date else None
-        stop = date_parse(finish_date) if finish_date else None
+        # assume 'today'
+        start = datetime.now().replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
+        )
+        stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
 
     context.gcal = GCalOptions(begins_at=start, finish_at=stop)
     context.target_calendar_id = _make_target_cal(context, calendar, calendar_id)
@@ -232,25 +238,25 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
     slot_list = []
     slot_schedules = {}
     events = [e for e in gcal.iter_tags()]
-    now = datetime.now(timezone.utc)
-    past_events = [e for e in events if e.valid_from < now]
+    now = datetime.now(tzlocal())
+    # TODO - the notion of 'upcoming' as relates to currently in-progress events is tricky
     upcoming_events = sorted(
-        (e for e in events if e.valid_from >= now), key=attrgetter("valid_from")
+        (e for e in events if e.valid_to >= now), key=attrgetter("valid_from")
     )
-
-    if upcoming_events:
-        slot_list.append(upcoming_events[0])
-        slot_schedules[slot_list[0].name] = upcoming_events
-
-    schedules = {
-        schedule_name: schedule_def
-        for schedule_name, schedule_def in _load_schedules(schedules)
-    }
 
     if now >= context.gcal.finish_at:
         raise click.UsageError(
             "Your target date range for scheduling must be in the future."
         )
+
+    if upcoming_events:
+        slot_list.append(upcoming_events[0].name)
+        slot_schedules[slot_list[0]] = upcoming_events
+
+    schedules = {
+        schedule_name: schedule_def
+        for schedule_name, schedule_def in _load_schedules(schedules)
+    }
 
     pre_existing_calendars = list(check_calendar_id)
     for calendar_name in check_calendar:
@@ -258,10 +264,9 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
             context.gcal.client.calendar_by_name(calendar_name)["id"]
         )
 
-    pre_existing_events = []
-    for calendar_id in set(pre_existing_calendars):
-        for event in context.gcal.client.load_gcal(calendar_id).iter_tags():
-            pre_existing_events.append(event)
+    loaded_calendars = [
+        context.gcal.client.load_gcal(cal) for cal in pre_existing_calendars
+    ]
 
     span = Span(
         begins_at=max(context.gcal.begins_at, now), finish_at=context.gcal.finish_at
@@ -270,38 +275,35 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
     unfeasible_count = 0
     while len(slot_list) < slots:
         if unfeasible_count >= 3:
-            if not slot_list:
-                click.secho(
-                    "Sorry! Could not find a feasible next event. Try relaxing your constraints?",
-                    bold=True,
-                )
-                click.secho("Nothing was written to your calendar!")
-                sys.exit(3)
+            break
+        if not schedules:  # "degrade gracefully", as per click's suggestion
             break
 
-        if not schedules:
-            # "degrade gracefully", as per click's suggestion
-            break
         # TODO - categories
         schedule_name = random.choice(
             list(schedules.keys())
         )  # TODO: random? or in order? or somehow all-together? Hmm.
         schedule = schedules[schedule_name]()
         schedule.schedule()
-        if pre_existing_events or past_events:
-            schedule.pre_existing_events(pre_existing_events + past_events)
+
+        no_pick_first = {
+            e.name: now for e in schedule.events.values() if e.name in slot_list
+        }
+        if all(key in no_pick_first for key in schedule.events.keys()):
+            break  # We've run out of things to try
 
         try:
-            new_events = sorted(
-                schedule.populate(span, no_pick_first={e.name for e in slot_list}),
-                key=attrgetter("valid_from"),
+            plan = schedule.populate(
+                span, loaded_calendars, no_pick_first=no_pick_first
             )
-        except ValueError:
+        except ValueError as e:
+            print(e)
             unfeasible_count += 1
             continue
 
+        new_events = sorted(plan.iter_tags(), key=attrgetter("valid_from"))
         if new_events:
-            slot_list.append(new_events[0])
+            slot_list.append(new_events[0].name)
             slot_schedules[new_events[0].name] = new_events
         else:
             unfeasible_count += 1
@@ -315,12 +317,12 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
         return
     click.secho("Choices:", bold=True)
     for i, event in enumerate(slot_list):
-        click.secho(
-            f"\t{i}:\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
-        )
+        click.secho(f"\t{i}:\t{event}")
         # TODO - show whole plan, somehow? Ugly UI.
-        for j, other in enumerate(slot_schedules[slot_list[i].name]):
-            click.secho(f"\t\t- {j}:\t {other.name}")
+        for other in slot_schedules[slot_list[i]]:
+            click.secho(
+                f"\t\t- {other.name} <{other.valid_from.isoformat()},{other.valid_to.isoformat()}>"
+            )
 
     choice = click.prompt(
         "Please enter your choice (ctrl+c to cancel):",
@@ -328,7 +330,7 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
         type=click.Choice(list(str(i) for i in range(len(slot_list)))),
     )
 
-    chosen_schedule = slot_schedules[slot_list[int(choice)].name]
+    chosen_schedule = slot_schedules[slot_list[int(choice)]]
 
     if sorted(upcoming_events, key=attrgetter("valid_from")) != chosen_schedule:
         click.secho("Removing previously scheduled events:", bold=True)
@@ -347,154 +349,6 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
         gcal.flush()
     else:
         click.secho("The current schedule has been chosen, no changes made.")
-
-
-@calendars.command()
-@click.option(
-    "--check-calendar",
-    default=None,
-    help="Check this calendar first and don't schedule events on top of it.",
-    multiple=True,
-)
-@click.option(
-    "--check-calendar-id",
-    default=None,
-    help="Check this calendar first and don't schedule events on top of it.",
-    multiple=True,
-)
-@click.option(
-    "--check-this-calendar/--no-check-this-calendar",
-    default=True,
-    help="Check the same calendar Hermes is scheduling with and don't schedule events on top of it. You must also set --no-replan.",
-)
-@click.option(
-    "--replan/--no-replan",
-    default=True,
-    help="Delete any existing Hermes events that the specified plans already define, and replan them. By default, works only on future events (see --replan-past).",
-)
-@click.option(
-    "--replan-past/--no-replan-past",
-    default=False,
-    help="Allow --replan to delete past events. Events that have already begun but not yet finished are considered 'past events'.",
-)
-@click.argument("schedules", type=click.Path(exists=True), nargs=-1)
-@pass_call_context
-def schedule(
-    context,
-    check_calendar,
-    check_calendar_id,
-    replan,
-    replan_past,
-    check_this_calendar,
-    schedules=None,
-):
-    """Import the specified schedule files (which are python files) and populate
-    the specified calendar according to schedule definitions in those files."""
-    if context.target_calendar_id is None:
-        raise click.UsageError(
-            "When clearing a schedule, you must specify one (and only one) calendar."
-        )
-
-    if replan and not check_this_calendar:
-        raise click.UsageError(
-            "--no-check-this-calendar requires you also set --no-replan explicitly. (Replanning requires checking this calendar.)"
-        )
-
-    if replan_past and not replan:
-        raise click.UsageError("--replan-past requires that you set --replan")
-
-    if not context.gcal.client.span.is_finite():
-        raise click.UsageError(
-            "You must specify both a start and finish time when scheduling. (You can't plan eternity... yet.)"
-        )
-    gcal = GoogleCalendarTimeSpan(
-        client=context.gcal.client,
-        calendar_id=context.target_calendar_id,
-        load_events=False,
-    )
-    base_category = Category("Hermes", None) / "Daily Schedule"
-
-    pre_existing_calendars = list(check_calendar_id)
-    for calendar_name in check_calendar:
-        pre_existing_calendars.append(
-            context.gcal.client.calendar_by_name(calendar_name)["id"]
-        )
-    if check_this_calendar:
-        pre_existing_calendars.append(context.target_calendar_id)
-
-    now = datetime.now(timezone.utc)
-    if replan_past:
-        replan_span = Span(
-            begins_at=context.gcal.begins_at, finish_at=context.gcal.finish_at
-        )
-    else:
-        if context.gcal.finish_at <= now:
-            raise click.UsageError(
-                "Cannot reschedule the past by default. See --reschedule-past."
-            )
-        replan_span = Span(
-            begins_at=max(context.gcal.begins_at, now), finish_at=context.gcal.finish_at
-        )
-
-    # When replan'ing, find the replanned events, so we can delete them later
-    replanned_events = set()
-    # TODO - possible race condition caused by loading this gcal twice. Cache?
-    if replan:
-        for event in context.gcal.client.load_gcal(
-            context.target_calendar_id
-        ).iter_tags():
-            if event.valid_from >= replan_span.begins_at:
-                replanned_events |= {event}
-
-    pre_existing_events = []
-    for calendar_id in set(pre_existing_calendars):
-        for event in context.gcal.client.load_gcal(calendar_id).iter_tags():
-            if (
-                replan
-                and calendar_id == context.target_calendar_id
-                and event in replanned_events
-            ):
-                continue
-            pre_existing_events.append(event)
-
-    if replan and replanned_events:
-        click.secho("Removing previously planned events (as per --replan)", bold=True)
-        for event in replanned_events:
-            click.secho(
-                f"\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
-            )
-            gcal.remove_tag(event)
-        click.secho("\n")
-
-    for schedule_name, schedule_def in _load_schedules(schedules):
-        click.secho(f"Scheduling with {schedule_name}", bold=True)
-        category = base_category / (schedule_def.NAME or schedule_name)
-        for day in dates_between(
-            Span(begins_at=context.gcal.begins_at, finish_at=context.gcal.finish_at)
-        ):
-            click.secho(f"\ton {day.isoformat()}")
-            schedule = schedule_def()
-            schedule.schedule()
-            if pre_existing_events:
-                schedule.pre_existing_events(pre_existing_events)
-            try:
-                events = schedule.populate(Span.from_date(day))
-            except ValueError:
-                click.secho(
-                    "Error: The scheduling problem was unfeasible. Try relaxing your constraints. Sorry about this!",
-                    bold=True,
-                )
-                click.secho(
-                    "(Note that this does not necessarily mean that it was IMPOSSIBLE - scheduling is hard!)"
-                )
-                click.secho("Nothing was written to your calendar!")
-                sys.exit(3)
-            for event in events:
-                click.secho(
-                    f"\t\t{event.name} <{event.valid_from.isoformat()}, {event.valid_to.isoformat()}>"
-                )
-                gcal.insert_tag(event.recategorize(category))
-    gcal.flush()
 
 
 def _make_target_cal(context, calendar, calendar_id) -> str:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime, time, timedelta, timezone
-from typing import cast, Dict, Iterable, List, NewType, Optional, Set, Tuple, TypeVar
+from typing import cast, Dict, Iterable, List, NewType, Optional, Tuple, TypeVar
 
 from dateutil.tz import tzlocal
 from ortools.sat.python import cp_model
@@ -81,12 +81,17 @@ class Schedule:
         self,
         span: FiniteSpan,
         pre_existing_timespans: Optional[Iterable[BaseTimeSpan]] = None,
-        no_pick_first: Optional[Iterable[str]] = None,
+        no_pick_first: Optional[Dict[str, datetime]] = None,
     ) -> TimeSpan:
         if no_pick_first is None:
-            _no_pick_first: Set[EventName] = set()
+            _no_pick_first: Dict[EventName, datetime] = {}
         else:
-            _no_pick_first = set(EventName(npf) for npf in no_pick_first)
+            _no_pick_first = {EventName(npf): dt for npf, dt in no_pick_first.items()}
+
+        if all(key in _no_pick_first for key in self.events.keys()):
+            raise ValueError(
+                "In order to not pick something first there must be other things to pick."
+            )
 
         # Establish pre-existing event boundaries
         if pre_existing_timespans:
@@ -104,7 +109,7 @@ class Schedule:
 
         # Constrain the events
         for event in self.events.values():
-            self.constrain(event, span, event.name in _no_pick_first)
+            self.constrain(event, span, _no_pick_first.get(event.name, None))
 
         # No interval overlapping (yet)
         self.model.add_no_overlap(self.events.values())
@@ -133,9 +138,11 @@ class Schedule:
             )
         )
 
-    def constrain(self, event: "Event", span: FiniteSpan, no_pick_first: bool) -> None:
-        if no_pick_first:
-            event.no_pick_first(self.model, self.events.values())
+    def constrain(
+        self, event: "Event", span: FiniteSpan, no_pick_first: Optional[datetime]
+    ) -> None:
+        if no_pick_first is not None:
+            event.no_pick_first(self.model, no_pick_first, self.events.values())
         event.choose_window(self.model, self.event_windows(span))
         event.not_within(self.model)
         event.by(self.model, span)
@@ -224,16 +231,21 @@ class Event:
         # be weird cruft in the calendar. Either way, we don't do it again.
 
     def no_pick_first(
-        self, model: "ConstraintModel", events: Iterable["Event"]
+        self,
+        model: "ConstraintModel",
+        no_pick_first: datetime,
+        events: Iterable["Event"],
     ) -> None:
         constraints = []
+        pick_after = int(no_pick_first.timestamp())
         for event in events:
             if event.name == self.name:
                 continue
             other_is_first = model.make_var(
                 f"npf_{self.name}_to_{event.name}", boolean=True
             )
-            model.add(self.start_time > event.start_time, sentinel=other_is_first)
+            model.add(self.start_time > event.stop_time, sentinel=other_is_first)
+            model.add(event.start_time >= pick_after, sentinel=other_is_first)
             constraints.append(other_is_first)
         if constraints:
             model.add(sum(constraints) > 0, sentinel=self.is_present)
@@ -243,10 +255,10 @@ class Event:
     ) -> None:
         constraints = []
         for i, window in enumerate(windows):
-            start_cons = self.start_time > int(
+            start_cons = self.start_time >= int(
                 cast(datetime, window.begins_at).timestamp()
             )
-            stop_cons = self.stop_time < int(
+            stop_cons = self.stop_time <= int(
                 cast(datetime, window.finish_at).timestamp()
             )
             this_window = model.make_var(f"{self.name}_window_{i}", boolean=True)
