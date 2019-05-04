@@ -4,7 +4,7 @@ import datetime as dt
 import json
 from operator import attrgetter
 from pathlib import Path
-from typing import Any, cast, Iterable, Optional, Set, Union
+from typing import Any, cast, Iterable, List, Optional, Set, Union
 
 import apsw
 import attr
@@ -399,8 +399,7 @@ class SqliteMetaTimeSpan(SqliteTimeSpan):
             """
         )
 
-    def insert_metatag(self, metatag: MetaTag) -> None:
-        tag = metatag.tag
+    def insert_metatag(self, tag: MetaTag) -> None:
         with self._sqlite_db:
             conn = self._sqlite_db.cursor()
             category_str = tag.category.fullpath if tag.category else "sqlite3"
@@ -420,9 +419,56 @@ class SqliteMetaTimeSpan(SqliteTimeSpan):
                     else None,
                     "name": tag.name,
                     "category": category.fullpath,
-                    "metadata": json.dumps(metatag.data),
+                    "metadata": json.dumps(tag.data),
                 },
             )
+
+    def reslice(
+        self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
+    ) -> "BaseTimeSpan":
+        tags: List[MetaTag] = []
+        query_start = """
+        SELECT valid_from, valid_to, name, category, metadata
+        FROM tags
+        WHERE
+        """
+        tag_is_infinite = "(valid_to IS NULL AND valid_from IS NULL)"
+
+        query_parts = [tag_is_infinite]
+
+        if begins_at is None and finish_at is None:
+            return type(self)(self.iter_tags())
+
+        elif begins_at is None:
+            query_parts += ["(valid_from IS NULL OR valid_from <= :finish_at)"]
+        elif finish_at is None:
+            query_parts += ["(valid_to IS NULL OR valid_to <= :begins_at)"]
+        else:
+            query_parts += [
+                "(valid_to >= :begins_at AND valid_from IS NULL)",
+                "(valid_to IS NULL AND valid_from <= :finish_at)",
+                "(valid_to >= :begins_at AND valid_from <= :finish_at)",
+            ]
+
+        query = f"{query_start} {' OR '.join(query_parts)}"
+
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            result = conn.execute(
+                query,
+                {
+                    "begins_at": begins_at.astimezone(tzutc()).isoformat()
+                    if begins_at is not None
+                    else None,
+                    "finish_at": finish_at.astimezone(tzutc()).isoformat()
+                    if finish_at is not None
+                    else None,
+                },
+            )
+            for row in result:
+                tags.append(self._metatag_from_row(row))
+
+        return type(self)(metatags=tags)
 
     def iter_metatags(self) -> Iterable[MetaTag]:
         with self._sqlite_db:
@@ -436,4 +482,4 @@ class SqliteMetaTimeSpan(SqliteTimeSpan):
     def _metatag_from_row(self, row: Any) -> MetaTag:
         tag = self._tag_from_row(row[0:4])
         data = json.loads(row[4]) if row[4] else {}
-        return MetaTag(tag=tag, data=data)
+        return MetaTag.from_tag(tag=tag, data=data)

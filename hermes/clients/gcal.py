@@ -35,6 +35,10 @@ from ..timespan import (
 )
 
 
+# TODO - switch to `google-auth`
+# oauth2client is deprecated.... thanks a lot!
+
+
 class GoogleServiceClient:
     # Subclasses should change to implement a service
     SERVICE_NAME = "DefaultService"  # will be part of a file name

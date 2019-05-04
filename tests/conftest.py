@@ -64,7 +64,7 @@ def sqlite_metatimespan(complex_timespan_tags):
     keys = ["foo", "bar", "☃", "null"]
     values = [10, "hello", ["this", "is", "a", "snowman", "☃"], None]
     for keyarg, valarg, tag in zip(keys, values, complex_timespan_tags):
-        ts.insert_metatag(MetaTag(tag=tag, data={keyarg: valarg}))
+        ts.insert_metatag(MetaTag.from_tag(tag=tag, data={keyarg: valarg}))
     return ts
 
 

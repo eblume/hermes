@@ -20,6 +20,7 @@ from appdirs import user_config_dir
 import click
 from dateutil.tz import tzlocal
 
+from .chores import ChoreStore
 from .clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
 from .schedule import Schedule
 from .span import Span
@@ -349,6 +350,32 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
         gcal.flush()
     else:
         click.secho("The current schedule has been chosen, no changes made.")
+
+
+@cli.group()
+@pass_call_context
+@click.option(
+    "--store",
+    type=click.Path(),
+    default=None,
+    envvar="HERMES_CHORE_STORE",
+    help="Path to a 'chore store' file. Will be created if it does not exist. A reasonable default is provided according to your operating system.",
+)
+def chores(context, store):
+    context.store = ChoreStore(
+        context.config.get("chore store", None)
+        if store is None
+        else click.format_filename(store)
+    )
+
+
+@chores.command(name="list")
+@pass_call_context
+def listchores(context):
+    for chore in context.store.chores():
+        click.secho(chore.name)
+    else:
+        click.secho("No chores found.")
 
 
 def _make_target_cal(context, calendar, calendar_id) -> str:

@@ -127,22 +127,17 @@ def test_subspans(generic_ro_timespan):
 
 def test_meta_tags(generic_span):
     tag = Tag.from_span(generic_span, name="example tag")
-    mtag = MetaTag(tag, {"foo": "bar"})
+    mtag = MetaTag.from_tag(tag, {"foo": "bar"})
     assert mtag.data["foo"] == "bar"
 
 
 def test_meta_tag_equality(generic_span):
     time1 = generic_span.begins_at
     time2 = generic_span.finish_at
-    t1 = MetaTag.create(
+    t1 = MetaTag(
         name="Foo", category=None, valid_from=time1, valid_to=time2, data={"foo": "bar"}
     )
-    t2 = MetaTag.create(
-        name="Foo",
-        category=None,
-        valid_from=time1,
-        valid_to=time2,
-        data={"biff": "boff"},
-    )
+    t2 = MetaTag.from_tag(t1, data={"biff": "boff"}, merge_data=False)
     assert t1 != t2
-    assert t1.tag == t2.tag
+    assert "biff" not in t1.data
+    assert "foo" not in t2.data
