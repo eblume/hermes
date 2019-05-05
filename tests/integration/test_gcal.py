@@ -1,37 +1,59 @@
 # -*- coding: utf-8 -*-
 from datetime import timedelta
 from operator import attrgetter
+from pathlib import Path
 
-from hermes.clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
+from hermes.clients.gcal import GoogleCalendarAPI, GoogleCalendarTimeSpan, GoogleClient
+from hermes.span import Span
 from hermes.timespan import date_parse
 import pytest
 
 
 @pytest.fixture(scope="module")
-def gcal_jan_2019():
+def gcal_client():
+    # This token file is, hopefully, not public. Only the author will be
+    # able to use it. You can make your own token to run these tests on your
+    # calendar if you like, but beware that you'll need a calendar called
+    # "Hermes Test" and that there may be some initial setup required on that
+    # calendar, which is not documented.
+    #
+    # If this token IS public, then I really messed up, and please tell me!
+    return GoogleClient.from_access_token_file(Path("calendar.token"))
+
+
+@pytest.fixture(scope="module")
+def gcal_api(gcal_client):
+    return GoogleCalendarAPI(gcal_client)
+
+
+@pytest.fixture(scope="module")
+def gcal_jan_2019(gcal_api):
     begin = date_parse("01 January 2019 00:00:00 PDT")
     finish = date_parse("31 January 2019 23:59:59 PDT")
     return GoogleCalendarTimeSpan.calendar_by_name(
-        "Hermes Test", begins_at=begin, finish_at=finish
+        "Hermes Test",
+        load_span=Span(begins_at=begin, finish_at=finish),
+        client=gcal_api,
     )
 
 
-@pytest.fixture(scope="module")
-def gcal_feb_02_2019():
+@pytest.fixture
+def feb_02_2019():
     begin = date_parse("02 February 2019 00:00:00 PDT")
     finish = date_parse("02 February 2019 23:59:59 PDT")
+    return Span(begins_at=begin, finish_at=finish)
+
+
+@pytest.fixture(scope="module")
+def gcal_feb_02_2019(gcal_api, feb_02_2019):
     return GoogleCalendarTimeSpan.calendar_by_name(
-        "Hermes Test", begins_at=begin, finish_at=finish
+        "Hermes Test", load_span=feb_02_2019, client=gcal_api
     )
 
 
 @pytest.fixture(scope="module")
-def gcal_hermes_test_id():
-    client = GoogleCalendarClient()
-    for calendar in client.calendars():
-        if calendar.get("summary") == "Hermes Test":
-            return calendar.get("id")
-    raise ValueError("Test Calendar not found!")
+def gcal_hermes_test_id(gcal_api):
+    return gcal_api.calendar_info_by_name("Hermes Test")["id"]
 
 
 def test_has_events(gcal_jan_2019):
@@ -46,17 +68,18 @@ def test_has_events(gcal_jan_2019):
     assert last_time <= gcal_jan_2019.span.finish_at
 
 
-def test_alternate_creation_args(gcal_hermes_test_id):
+def test_alternate_creation_args(gcal_hermes_test_id, gcal_api):
     begin = date_parse("01 January 2019 00:00:00 PDT")
     finish = date_parse("31 January 2019 23:59:59 PDT")
     tags_a = set(
         GoogleCalendarTimeSpan(
-            GoogleCalendarClient(begins_at=begin, finish_at=finish),
             calendar_id=gcal_hermes_test_id,
+            load_span=Span(begins_at=begin, finish_at=finish),
+            client=gcal_api,
         ).iter_tags()
     )
     tags_b = set(
-        GoogleCalendarTimeSpan(calendar_id=gcal_hermes_test_id)[
+        GoogleCalendarTimeSpan(calendar_id=gcal_hermes_test_id, client=gcal_api)[
             begin:finish
         ].iter_tags()
     )
@@ -78,24 +101,21 @@ def test_calendar_by_name(gcal_jan_2019, gcal_hermes_test_id):
     assert gcal_jan_2019.calendar_id == gcal_hermes_test_id
 
 
-def test_calendar_span(gcal_feb_02_2019):
-    assert gcal_feb_02_2019.span.begins_at is not None
-    assert gcal_feb_02_2019.span.finish_at is not None
-
-
-def test_create_event(gcal_feb_02_2019):
+def test_create_event(gcal_feb_02_2019, feb_02_2019, gcal_api):
     assert len(gcal_feb_02_2019) == 0
+    assert not gcal_feb_02_2019.span.is_finite()
 
     os = gcal_feb_02_2019.span
     event = gcal_feb_02_2019.add_event(
         "Test Event 1",
-        when=os.begins_at + timedelta(hours=1),
+        when=feb_02_2019.begins_at + timedelta(hours=1),
         duration=timedelta(hours=2),
     )
     assert len(gcal_feb_02_2019) == 1
+    assert gcal_feb_02_2019.span.is_finite()
 
     new_gcal = GoogleCalendarTimeSpan.calendar_by_name(
-        "Hermes Test", begins_at=os.begins_at, finish_at=os.finish_at
+        "Hermes Test", begins_at=os.begins_at, finish_at=os.finish_at, client=gcal_api
     )
     assert len(new_gcal) == 0  # no flush yet
 
@@ -114,3 +134,4 @@ def test_create_event(gcal_feb_02_2019):
     new_gcal.flush()
     gcal_feb_02_2019.flush()
     assert len(gcal_feb_02_2019) == 0
+    assert not gcal_feb_02_2019.span.is_finite()

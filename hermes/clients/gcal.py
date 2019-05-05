@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 from collections import deque
 import datetime as dt
+import json
+import os
 from pathlib import Path
 import re
 from typing import (
     Any,
-    Callable,
-    ContextManager,
     Deque,
     Dict,
     Iterable,
+    List,
+    NewType,
     Optional,
     Tuple,
     Type,
@@ -19,12 +21,12 @@ from typing import (
 import warnings
 
 from appdirs import user_data_dir
-from googleapiclient import discovery
-from googleapiclient.http import build_http
-from oauth2client import client as oauth2_client, file, tools
+from google.auth.transport.requests import AuthorizedSession
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 from ..categorypool import BaseCategoryPool
-from ..span import Span, Spannable
+from ..span import Span
 from ..tag import Category, Tag
 from ..timespan import (
     BaseTimeSpan,
@@ -34,115 +36,211 @@ from ..timespan import (
     SqliteTimeSpan,
 )
 
+# POSSIBLE, BUT NOT IMPLEMENTED AT THIS TIME:
+# AppEngine auto-credentials
+# Impersonated credentials
+# ServiceAccount credentials
+# Mobile account flow
+# Legacy account flow
+# Web app flow TODO
 
-# TODO - switch to `google-auth`
-# oauth2client is deprecated.... thanks a lot!
 
+class GoogleClient:
+    """Google API client for OAuth2 User/Client credentials."""
 
-class GoogleServiceClient:
-    # Subclasses should change to implement a service
-    SERVICE_NAME = "DefaultService"  # will be part of a file name
-    SERVICE_SCOPE: Union[str, Iterable[str]] = "http://www.example.com/api"
-
-    # Probably won't need to change ever
     SERVICE_APP_NAME = "HermesCLI"
     SERVICE_APP_AUTHOR = "Hermes"
-    SERVICE_APP_VERSION = "v3"
-
-    def __init__(self, oauth_config: Optional[Path] = None):
-        self.oauth_config_path = oauth_config
-        self._service = None
-
-    @property
-    def service(self):  # type?
-        if self._service:
-            return self._service
-
-        appname = self.SERVICE_APP_NAME
-        appauthor = self.SERVICE_APP_AUTHOR
-        service_name = self.SERVICE_NAME
-        version = "v3"
-
-        if self.oauth_config_path is None:
-            config_dir: str = user_data_dir(appname, appauthor)
-            # Eventually this needs to be replaced with an OAUTH service auth
-            # (or something? maybe this already works??)
-            self.oauth_config_path = Path(config_dir) / "gcal.json"
-        client_secrets = str(self.oauth_config_path)
-
-        token_store = file.Storage(service_name + ".token")
-        with warnings.catch_warnings():
-            # This warns on 'file not found' which is handled below.
-            credentials = token_store.get()
-        if credentials is None or credentials.invalid:
-            flow = oauth2_client.flow_from_clientsecrets(
-                client_secrets,
-                scope=self.SERVICE_SCOPE,
-                message=tools.message_if_missing(client_secrets),
-            )
-            credentials = tools.run_flow(flow, token_store)
-        http = credentials.authorize(http=build_http())
-
-        # TODO - support offline discovery file
-        # (see discovery.build_from_document)
-        self._service = discovery.build(
-            service_name, version, http=http, cache_discovery=False
-        )
-        return self._service
-
-
-class GoogleCalendarClient(GoogleServiceClient, Spannable):
-    SERVICE_NAME = "calendar"
-    SERVICE_SCOPE = [
+    SERVICE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+    SERVICE_AUTH_URL = "https://oauth2.googleapis.com/o/oauth2/auth"
+    SERVICE_SCOPES = [
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar.readonly",
     ]
+    DEFAULT_CLIENT_SECRETS_FILE = (
+        Path(user_data_dir(SERVICE_APP_NAME, SERVICE_APP_AUTHOR)) / "gcal.json"
+    )
 
-    DEFAULT_BASE_CATEGORY = Category("GCal", None)
+    T = TypeVar("T", bound="GoogleClient")
 
-    def __init__(
-        self,
-        begins_at: Optional[dt.datetime] = None,
-        finish_at: Optional[dt.datetime] = None,
-        base_category: Category = None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-
-        self.begins_at: Optional[dt.datetime] = begins_at.astimezone(
-            dt.timezone.utc
-        ) if begins_at else None
-        self.finish_at: Optional[dt.datetime] = finish_at.astimezone(
-            dt.timezone.utc
-        ) if finish_at else None
-        self.base_category: Optional[
-            Category
-        ] = base_category or self.DEFAULT_BASE_CATEGORY
+    def __init__(self, session: AuthorizedSession, credentials: Credentials) -> None:
+        """Use the `from_*` class methods to construct this client."""
+        self._session = session
+        self._credentials = credentials
 
     @property
-    def span(self) -> Span:
-        return Span(begins_at=self.begins_at, finish_at=self.finish_at)
+    def session(self) -> AuthorizedSession:
+        return self._session
 
-    def calendars(self) -> Iterable[Dict[str, Any]]:
-        page_token = None
+    @property
+    def credentials(self) -> Credentials:
+        # TODO - refresh? is valid check?
+        return self._credentials
+
+    def write_authorized_user_file(
+        self, file: Path = None, redirect_uris: List[str] = None
+    ) -> None:
+        """Write a client_secrets file to the specified Path. A sensible default
+        is chosen using app_dirs, on linux it is "~/.local/share/HermesCLI/gcal.json"
+
+        THESE CREDENTIALS NEED TO BE KEPT SECURE! If you believe your
+        credentials have been compromised, it is YOUR responsibility to
+        deactivate them from the google cloud console:
+
+            https://console.cloud.google.com/apis/credentials
+        """
+        if file is None:
+            file = self.DEFAULT_CLIENT_SECRETS_FILE
+            if not file.parent.exists():
+                os.makedirs(file.parent)
+
+        key_type = "web"
+        if redirect_uris is None:
+            key_type = "installed"
+            redirect_uris = ["http://localhost", "urn:ietf:wg:oauth:2.0:oob"]
+
+        data = {
+            "client_id": self.credentials.client_id,
+            "client_secret": self.credentials.client_secret,
+            "redirect_uris": redirect_uris,
+            "auth_uri": self.SERVICE_AUTH_URL,
+            "token_uri": self.SERVICE_TOKEN_URL,
+        }
+
+        file.write_text(json.dumps({key_type: data}))
+
+    def write_access_token_file(self, file: Path) -> None:
+        """Write the access token to a file. Note that this file is effectively
+        a password, so keep it safe and secure! You should generally avoid
+        using this and instead prefer to use the `from_local_web_server` or
+        `from_console` constructors to avoid saving a token locally, but
+        this can be useful in some cases. Example: this is used to automate
+        integration testing in Hermes.
+
+        No default path is given to force you to think about this. :)
+        """
+        data = {
+            "access_token": self.credentials.token,
+            "refresh_token": self.credentials.refresh_token,
+            "token_uri": self.SERVICE_TOKEN_URL,
+            "client_id": self.credentials.client_id,
+            "client_secret": self.credentials.client_secret,
+        }
+        file.write_text(json.dumps(data))
+
+    @classmethod
+    def from_access_token(
+        cls: Type[T],
+        access_token: str,
+        refresh_token: str = None,
+        token_uri: str = SERVICE_TOKEN_URL,
+        client_id: str = None,
+        client_secret: str = None,
+    ) -> T:
+        """If the optional fields are all supplied, the token will auto-refresh when expired."""
+        credentials = Credentials(
+            access_token,
+            refresh_token=refresh_token,
+            token_uri=token_uri,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        session = AuthorizedSession(credentials)
+        return cls(session, credentials)
+
+    @classmethod
+    def from_access_token_file(cls: Type[T], file: Path) -> T:
+        return cls.from_access_token(**json.loads(file.read_text()))
+
+    @classmethod
+    def from_local_web_server(cls: Type[T], secrets_file: Path = None) -> T:
+        """Create a GoogleClient by running the web server flow. Spawns a
+        short-lived local web server to receive the OAuth2 callback. Attempts
+        to open the user's browser, or else prompts them to go to a URL."""
+        if secrets_file is None:
+            secrets_file = cls.DEFAULT_CLIENT_SECRETS_FILE
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(secrets_file), scopes=cls.SERVICE_SCOPES
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # 'scope creep'
+            flow.run_local_server()  # NB: there are a lot of options that could be passed here.
+        session = flow.authorized_session()
+        return cls(session, flow.credentials)
+
+    @classmethod
+    def from_console(cls: Type[T], secrets_file: Path = None) -> T:
+        """Create a GoogleClient by running the in-console flow. Blocks on user
+        input."""
+        if secrets_file is None:
+            secrets_file = cls.DEFAULT_CLIENT_SECRETS_FILE
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(secrets_file), scopes=cls.SERVICE_SCOPES
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # 'scope creep'
+            flow.run_console()
+        session = flow.authorized_session()
+        return cls(session, flow.credentials)
+
+
+CalendarID = NewType("CalendarID", str)
+
+
+class GoogleCalendarAPI:
+    API_PREFIX = "https://www.googleapis.com/calendar/v3"
+    DEFAULT_BASE_CATEGORY = Category("GCal", None)
+
+    def __init__(self, client: GoogleClient, base_category: Category = None) -> None:
+        self._client = client
+        self.base_category = base_category or self.DEFAULT_BASE_CATEGORY
+
+    def _get(self, endpoint: str, params: Dict[str, str] = None) -> Dict[str, Any]:
+        return self._client.session.get(
+            f"{self.API_PREFIX}{endpoint}", params=params
+        ).json()
+
+    def _paginated_get(
+        self, endpoint: str, params: Dict[str, str] = None
+    ) -> Iterable[Dict[str, Any]]:
+        _params = dict(params) if params else {}
         while True:
-            calendar_list = (
-                self.service.calendarList().list(pageToken=page_token).execute()
-            )
-            yield from calendar_list["items"]
-            page_token = calendar_list.get("nextPageToken")
-            if page_token is None:
+            response = self._get(endpoint, params=_params)
+            yield from response["items"]
+            page_token = response.get("nextPageToken", None)
+            if not page_token:
                 break
+            _params["pageToken"] = page_token
 
-    def calendar(self, calendar_id: str = "primary") -> Dict[str, Any]:
-        # Note that the info returned by calendars() is slightly disjoint.
-        return self.service.calendars().get(calendarId=calendar_id).execute()
+    def _post(
+        self, endpoint: str, params: Dict[str, str] = None, data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        return self._client.session.post(
+            f"{self.API_PREFIX}/{endpoint}", params=params, data=data
+        ).json()
 
-    def calendar_by_name(self, calendar: str) -> Optional[Dict[str, Any]]:
-        calendars = {c["summary"]: c for c in self.calendars()}
-        return calendars.get(calendar, None)
+    def _delete(self, endpoint: str, params: Dict[str, str] = None) -> None:
+        return self._client.session.delete(
+            f"{self.API_PREFIX}/{endpoint}", params=params
+        )
 
-    def create_event(self, tag: Tag, calendar_id: str) -> Dict[str, Any]:
+    # Public members
+
+    def calendars(self) -> Iterable[CalendarID]:
+        for item in self._paginated_get("/users/me/calendarList"):
+            yield CalendarID(item["id"])
+
+    def calendar_info(self, calendar_id: CalendarID) -> Dict[str, Any]:
+        return self._get(f"/calendars/{calendar_id}")
+
+    def calendar_info_by_name(self, name: str) -> Dict[str, Any]:
+        for item in self._paginated_get("/users/me/calendarList"):
+            if item["summary"] == name:
+                # TODO - the calendarList / calendar.get info is disjoint,
+                # maybe we can do better by combining it?
+                return self.calendar_info(item["id"])
+        raise KeyError("Specified name was not found", name)
+
+    def create_event(self, tag: Tag, calendar_id: CalendarID) -> Dict[str, Any]:
         if tag.valid_from is None or tag.valid_to is None:
             raise ValueError("Events must have concrete start and end times")
         start: dt.datetime = tag.valid_from
@@ -153,173 +251,89 @@ class GoogleCalendarClient(GoogleServiceClient, Spannable):
             "start": {"dateTime": start.isoformat(), "timeZone": start.tzname()},
             "end": {"dateTime": end.isoformat(), "timeZone": end.tzname()},
         }
-        return (
-            self.service.events().insert(calendarId=calendar_id, body=event).execute()
-        )
+        return self._post(f"/calendars/{calendar_id}/events", data=event)
 
-    def remove_events(self, tag: Tag, calendar_id: str) -> None:
-        if tag.valid_from is None or tag.valid_to is None:
+    def remove_events(self, tag: Tag, calendar_id: CalendarID) -> None:
+        """Remove all events that exactly correspond to this tag."""
+        start = tag.valid_from
+        end = tag.valid_to
+        if start is None or end is None:
             raise ValueError("Events must have concrete start and end times")
-        start: str = tag.valid_from.isoformat()
-        end: str = tag.valid_to.isoformat()
-        page_token: Optional[str] = None
-        while True:
-            events = (
-                self.service.events()
-                .list(
-                    calendarId=calendar_id,
-                    pageToken=page_token,
-                    timeMax=end,
-                    timeMin=start,
-                    timeZone=tag.valid_from.tzname(),
-                )
-                .execute()
-            )
-            page_token = events.get("nextPageToken")
-            for event in events["items"]:
-                self.service.events().delete(
-                    calendarId=calendar_id, eventId=event["id"]
-                ).execute()
-                # TODO - check success?
-            if page_token is None:
-                break
+        if end.tzinfo != start.tzinfo:
+            end = end.astimezone(start.tzinfo)
 
-    def load_gcal(
-        self,
-        calendar_id: Optional[str] = None,
-        progress: Optional[
-            Callable[..., ContextManager[Iterable[Dict[str, Any]]]]
-        ] = None,
-        load_events: bool = True,
-    ) -> SqliteTimeSpan:
-        """Create a TimeSpan from the specified `ouath_config` file.
-
-        If `progress` is specified, it will wrap the download process, to (eg)
-        allow for a progress bar to be displayed.
-
-        THIS WILL BLOCK AND REQUIRE USER INPUT on the first time that it is run
-        on your system, in order to sign you in!
-
-        `oauth_config` should be a file that contains google OAuth credentials.
-        Currently, ALL calendar events from ALL calendars are downloaded, but
-        filtering options will be available in the future. If left as `None`,
-        the default will be used from `appdirs`, which uses OS-aware
-        configuration directory schemes. See `appdirs` for more information.
-        The default config file must be named 'gcal.json' inside the
-        `appdirs.user_data_dir()`, which is typically one of:
-
-        'C:\\Users\\erich\\AppData\\Local\\Hermes\\HermesCLI'
-        '/home/erich/.local/share/HermesCLI'
-        '/Users/erich/Library/Application Support/HermesCLI'
-
-        If `load_events` is False, the created timespan will not download
-        any event data. This is useful when you are only inserting events and
-        do not need existing calendar data.
-        """
-        return SqliteTimeSpan(
-            set(
-                self._tag_events_from_service(
-                    calendar_id or "primary", progress=progress
-                )
-            )
-        )
-
-    def _tag_events_from_service(
-        self,
-        calendar_id: str,
-        progress: Optional[
-            Callable[..., ContextManager[Iterable[Dict[str, Any]]]]
-        ] = None,
-    ) -> Iterable["Tag"]:
-        calendar = self.calendar(calendar_id)
-        title = calendar.get("summary", f"Imported GCal")
-        title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
-        category = Category(title, self.base_category)
-        # calendar_resource = service.calendars().get(calendarId=calendar['id']).execute()
-        # ^ unclear if there's anything useful there, I think we get the same data from calendarList
-        # details that are different:
-        # * etag is different. Totally unclear what this is.
-        # * missing from calendar_resource: summaryOverride, backgroundColor, defaultReminders, accessRole, foregroundColor, colorId
-        # * (none missing in reverse)
-        # Conclusion: for at least some calendars, we get nothing useful
-
-        def _wrap_for_progress(events: Iterable[Dict[str, Any]]):
-            if progress is None:
-                yield from events
-            else:
-                last_event = None
-                with progress(events) as bar:
-                    for event in bar:
-                        if last_event is not None:
-                            bar.update(
-                                (
-                                    event["valid_from"] - last_event["valid_from"]
-                                ).total_seconds()
-                            )
-                        yield event
-                        last_event = event
-
-        for event in _wrap_for_progress(
-            self._retrieve_events_from_calendar(calendar_id)
+        for event_info in self._paginated_get(
+            f"/calendars/{calendar_id}/events",
+            params={"timeMax": end.isoformat(), "timeMin": start.isoformat()},
         ):
-            yield Tag(
-                name=event.get("summary", event.get("id")),
-                category=category,
-                valid_from=event["valid_from"],
-                valid_to=event["valid_to"],
-            )
+            self._delete(f"/calendars/{calendar_id}/events/{event_info['id']}")
 
-    def _retrieve_events_from_calendar(self, calendar_id: str):
-        # https://developers.google.com/calendar/v3/reference/events/list
-        begins_at: Optional[str] = None
-        if self.begins_at is not None:
-            begins_at = self.begins_at.isoformat() + (
-                "Z" if self.begins_at.tzinfo is None else ""
-            )
+    def load_timespan(
+        self, calendar_id: CalendarID = None, span: Span = None
+    ) -> SqliteTimeSpan:
+        return SqliteTimeSpan(tags=self.events(calendar_id, span))
 
-        finish_at: Optional[str] = None
-        if self.finish_at is not None:
-            finish_at = self.finish_at.isoformat() + (
-                "Z" if self.finish_at.tzinfo is None else ""
-            )
+    def events(
+        self, calendar_id: CalendarID = None, span: Span = None
+    ) -> Iterable[Tag]:
+        if calendar_id is None:
+            calendar_ids = list(self.calendars())
+        else:
+            calendar_ids = [calendar_id]
 
-        page_token = None
-        while True:
+        if span is None:
+            span = Span(None, None)
+
+        for cid in calendar_ids:
+            calendar = self.calendar_info(cid)
+            title = calendar.get("summary", f"Imported GCal")
+            title = re.sub(r"[^a-zA-Z0-9:\- ]*", "", title)
+            category = self.base_category / title
+
             query_params = {
-                "calendarId": calendar_id,
+                "calendarId": cid,
                 "timeZone": "Etc/UTC",  # TODO - figure out how to get this to play nice with dateutil
-                "maxResults": 2500,
+                "maxResults": "2500",
                 "singleEvents": "true",  # Don't expand recurring events (hermes doesn't use them anyway)
                 "orderBy": "startTime",  # requires singleEvents = True
             }
-            # There are tons of other query params to look in to. Also, live syncing!
+            begins_at = ""
+            if span.begins_at is not None:
+                begins_at = span.begins_at.isoformat() + (
+                    "Z" if span.begins_at.tzinfo is None else ""
+                )
+
+            finish_at = ""
+            if span.finish_at is not None:
+                finish_at = span.finish_at.isoformat() + (
+                    "Z" if span.finish_at.tzinfo is None else ""
+                )
             if begins_at:
                 query_params["timeMin"] = begins_at
             if finish_at:
                 query_params["timeMax"] = finish_at
-            if page_token:
-                query_params["pageToken"] = page_token
 
-            events = self.service.events().list(**query_params).execute()
-            for event in events["items"]:
-                # Hide some goodies to avoid doing this multiple times
+            for event in self._paginated_get(
+                f"/calendars/{calendar_id}/events", params=query_params
+            ):
                 start = event.get("start")
                 end = event.get("end")
-                event["valid_from"] = (
+                valid_from = (
                     date_parse(start.get("dateTime", start.get("date", None)))
                     if start
                     else None
                 )
-                event["valid_to"] = (
+                valid_to = (
                     date_parse(end.get("dateTime", end.get("date", None)))
                     if end
                     else None
                 )
-                yield event
-
-            page_token = events.get("nextPageToken", None)
-            if page_token is None:
-                break
+                yield Tag(
+                    name=event.get("summary", event.get("id")),
+                    category=category,
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                )
 
 
 T = TypeVar("T", bound="GoogleCalendarTimeSpan")
@@ -330,23 +344,25 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     def __init__(
         self,
-        client: Optional[GoogleCalendarClient] = None,
-        calendar_id: str = "primary",
+        calendar_id: CalendarID = CalendarID("primary"),
         load_events: bool = True,
+        load_span: Span = None,
+        client: GoogleCalendarAPI = None,
     ):
+        """Load the specified calendar. load_events=False can be useful to insert events without loading existing ones."""
         if client is None:
-            self.client = GoogleCalendarClient()
+            client = GoogleCalendarAPI(GoogleClient.from_local_web_server())
         else:
             self.client = client
         self.calendar_id = calendar_id
 
-        calendar = self.client.calendar(self.calendar_id)
-        self.calendar_name = calendar.get(
+        calendar_info = self.client.calendar_info(calendar_id)
+        self.calendar_name = calendar_info.get(
             "summary", f"Unknown Calendar: {self.calendar_id}"
         )
 
         if load_events:
-            self._cached_timespan = self.client.load_gcal(self.calendar_id)
+            self._cached_timespan = self.client.load_timespan(calendar_id, load_span)
         else:
             self._cached_timespan = SqliteTimeSpan()
 
@@ -355,29 +371,34 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     @classmethod
     def calendar_by_name(
-        cls: Type[T], calendar_name: str, ignore_case: bool = True, **client_kwargs
+        cls: Type[T],
+        calendar_name: str,
+        ignore_case: bool = True,
+        client: GoogleCalendarAPI = None,
+        **kwargs,
     ) -> T:
-        client = GoogleCalendarClient(**client_kwargs)
+        if client is None:
+            client = GoogleCalendarAPI(GoogleClient.from_local_web_server())
 
         search_cal = calendar_name.lower() if ignore_case else calendar_name
-        calendar_id: Optional[str] = None
-        for calendar in client.calendars():
-            title = calendar.get("summary", "")
+        found_cal_id: Optional[CalendarID] = None
+        for calendar_id in client.calendars():
+            calendar_info = client.calendar_info(calendar_id)
+            title = calendar_info.get("summary", "")
             if ignore_case:
                 title = title.lower()
             if title.startswith(search_cal):
-                calendar_id = calendar.get("id")
+                found_cal_id = calendar_info.get("id")  # type: ignore
                 break
 
-        if calendar_id is None:
+        if found_cal_id is None:
             raise KeyError("Calendar not found")
 
-        return cls(calendar_id=calendar_id, client=client)
+        return cls(calendar_id=found_cal_id, client=client, **kwargs)
 
     @property
     def span(self) -> Span:
-        # TODO - do we need to enforce this span on the cached timeline?
-        return self.client.span
+        return self._cached_timespan.span
 
     @property
     def category_pool(self) -> BaseCategoryPool:
@@ -396,12 +417,11 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
     def reslice(
         self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
     ) -> "GoogleCalendarTimeSpan":
-        newclient = GoogleCalendarClient(
-            begins_at=begins_at,
-            finish_at=finish_at,
-            base_category=self.client.base_category,
+        return GoogleCalendarTimeSpan(
+            calendar_id=self.calendar_id,
+            load_span=Span(begins_at, finish_at),
+            client=self.client,
         )
-        return GoogleCalendarTimeSpan(client=newclient, calendar_id=self.calendar_id)
 
     def insert_tag(self, tag: Tag) -> None:
         self._cached_timespan.insert_tag(tag)  # TODO - support rollbacks?
@@ -428,7 +448,11 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
     def remove_events(
         self, event_name: Optional[str] = None, during: Optional[Span] = None
     ) -> None:
-        window = self._cached_timespan.slice_with_span(during or self.client.span)
+        if during is not None:
+            window = self._cached_timespan.slice_with_span(during)
+        else:
+            window = self._cached_timespan
+
         for tag in window.iter_tags():
             if event_name is None or tag.name == event_name:
                 self.remove_tag(tag)
