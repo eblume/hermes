@@ -14,8 +14,6 @@ appdirs = "^1.4"
 apsw = "^3.9"
 ortools = "^7.0"
 google-auth = "^1.6"
-requests = "^2.21"
-requests-oauthlib = "^1.2"
 google-auth-oauthlib = "^0.3.0"
 
 [tool.poetry.dev-dependencies]
