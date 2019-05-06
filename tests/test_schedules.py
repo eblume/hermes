@@ -190,9 +190,7 @@ def test_can_schedule_with_known_preexisting_events(example_daily_schedule, a_da
             assert event.span in twelve_pm_hour
 
 
-def test_records_subclass_schedules_and_ensures_unique_names(
-    example_daily_schedule, a_day
-):
+def test_records_subclass_schedules(example_daily_schedule, a_day):
     assert example_daily_schedule.__name__ == "MyDailySchedule"
     assert example_daily_schedule.__name__ in Schedule.DEFINED_SCHEDULES
     new_schedule = Schedule.DEFINED_SCHEDULES[example_daily_schedule.__name__]()
