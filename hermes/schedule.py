@@ -1,6 +1,18 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime, time, timedelta, timezone
-from typing import cast, Dict, Iterable, List, NewType, Optional, Tuple, TypeVar
+import sys
+from typing import (
+    cast,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    NewType,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+)
 
 from dateutil.tz import tzlocal
 from ortools.sat.python import cp_model
@@ -11,8 +23,8 @@ from .timespan import BaseTimeSpan, TimeSpan
 
 
 class Schedule:
-    NAME: Optional[str] = None
-    DEFAULT_DURATION = timedelta(minutes=30)
+    DEFAULT_DURATION: ClassVar[timedelta] = timedelta(minutes=30)
+    DEFINED_SCHEDULES: ClassVar[Dict[str, Type["Schedule"]]] = {}
 
     def __init__(self, **kwargs):
         if kwargs:
@@ -152,6 +164,14 @@ class Schedule:
     def objective(self) -> None:
         """Default objective: schedule as many optional events as possible"""
         self.model.maximize(self.events.values())
+
+    # Implicit classmethod
+    def __init_subclass__(cls, **kwargs) -> None:
+        # This behavior breaks unit tests, and we are comfortable it ONLY
+        # breaks unit tests.
+        if cls.__name__ in Schedule.DEFINED_SCHEDULES and "pytest" not in sys.modules:
+            raise ValueError("A schedule with this class name already exists.")
+        Schedule.DEFINED_SCHEDULES[cls.__name__] = cls
 
 
 EventType = TypeVar("EventType", bound="Event")

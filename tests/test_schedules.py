@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from datetime import date, time, timedelta
 
-from hermes.schedule import DailySchedule
+from hermes.schedule import DailySchedule, Schedule
 from hermes.span import Span
 from hermes.tag import Tag
 from hermes.timespan import TimeSpan
@@ -188,3 +188,13 @@ def test_can_schedule_with_known_preexisting_events(example_daily_schedule, a_da
     for event in scheduled_events:
         if event.name == "Eat lunch":
             assert event.span in twelve_pm_hour
+
+
+def test_records_subclass_schedules_and_ensures_unique_names(
+    example_daily_schedule, a_day
+):
+    assert example_daily_schedule.__name__ == "MyDailySchedule"
+    assert example_daily_schedule.__name__ in Schedule.DEFINED_SCHEDULES
+    new_schedule = Schedule.DEFINED_SCHEDULES[example_daily_schedule.__name__]()
+    new_schedule.schedule()
+    assert len(list(new_schedule.populate(a_day).iter_tags())) == 12
