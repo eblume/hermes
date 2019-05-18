@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from typing import (
     Any,
+    Callable,
     Deque,
     Dict,
     Iterable,
@@ -134,17 +135,17 @@ class GoogleClient:
     @classmethod
     def from_access_token(
         cls: Type[T],
+        refresh_callback: Callable[[T], None] = None,
         access_token: str = None,
         refresh_token: str = None,
         token_uri: str = SERVICE_TOKEN_URL,
         client_id: str = None,
         client_secret: str = None,
-        write_refreshed_token: Path = None,
     ) -> T:
         """If the optional fields are all supplied, the token will auto-refresh when expired.
 
-        If the token is refreshed and `write_refreshed_token` is set to a path, that file
-        will be created/overwritten with the refreshed token,
+        If the token is refreshed and `refresh_callback` has been set, the callback
+        will be called with a reference to the newly created client.
         """
         credentials = Credentials(
             access_token,
@@ -154,26 +155,35 @@ class GoogleClient:
             client_secret=client_secret,
             scopes=cls.SERVICE_SCOPES,
         )
-        if not credentials.expired:
-            session = AuthorizedSession(credentials)
-            client = cls(session, credentials)
-        else:
+        refreshed = False
+        if credentials.expired:
             credentials.refresh(Request())
-            session = AuthorizedSession(credentials)
-            client = cls(session, credentials)
-            if write_refreshed_token is not None:
-                client.write_access_token_file(write_refreshed_token)
+            refreshed = True
+        session = AuthorizedSession(credentials)
+        client = cls(session, credentials)
+        if refreshed and refresh_callback is not None:
+            refresh_callback(client)
         return client
 
     @classmethod
-    def from_access_token_file(cls: Type[T], file: Path, create: bool = False) -> T:
-        if not file.exists() and create:
+    def from_access_token_file(cls: Type[T], file: Path, update_file: bool = True) -> T:
+        """Load the specified file as an access token for a new client.
+
+        If `update_file` is `True` (default), then the specified file will be
+        created if it did not exist (after prompting the user via a web browser
+        popup dialog). If the file did exist (and `update_file` is True), and
+        if the file's token was out of date and needed refreshing, then the
+        file will be rewritten with the refreshed token."""
+        if not file.exists() and update_file:
             client = cls.from_local_web_server()
             client.write_access_token_file(file)
         else:
             token = json.loads(file.read_text())
-            if create:
-                token["write_refreshed_token"] = file
+
+            def _refresh_cb(cb_client: "GoogleClient.T") -> None:
+                if update_file:
+                    cb_client.write_access_token_file(file)
+
             client = cls.from_access_token(**token)
         return client
 
