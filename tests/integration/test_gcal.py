@@ -11,14 +11,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def gcal_client():
-    # This token file is, hopefully, not public. Only the author will be
-    # able to use it. You can make your own token to run these tests on your
-    # calendar if you like, but beware that you'll need a calendar called
-    # "Hermes Test" and that there may be some initial setup required on that
-    # calendar, which is not documented.
-    #
-    # If this token IS public, then I really messed up, and please tell me!
-    return GoogleClient.from_access_token_file(Path("calendar.token"))
+    return GoogleClient.from_access_token_file(Path("calendar.token"), create=True)
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +30,7 @@ def gcal_jan_2019(gcal_api):
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def feb_02_2019():
     begin = date_parse("02 February 2019 00:00:00 PDT")
     finish = date_parse("02 February 2019 23:59:59 PDT")
@@ -103,22 +96,20 @@ def test_calendar_by_name(gcal_jan_2019, gcal_hermes_test_id):
 
 def test_create_event(gcal_feb_02_2019, feb_02_2019, gcal_api):
     assert len(gcal_feb_02_2019) == 0
-    assert not gcal_feb_02_2019.span.is_finite()
 
-    os = gcal_feb_02_2019.span
     event = gcal_feb_02_2019.add_event(
         "Test Event 1",
         when=feb_02_2019.begins_at + timedelta(hours=1),
         duration=timedelta(hours=2),
     )
     assert len(gcal_feb_02_2019) == 1
-    assert gcal_feb_02_2019.span.is_finite()
 
     new_gcal = GoogleCalendarTimeSpan.calendar_by_name(
-        "Hermes Test", begins_at=os.begins_at, finish_at=os.finish_at, client=gcal_api
+        "Hermes Test", load_span=feb_02_2019, client=gcal_api
     )
     assert len(new_gcal) == 0  # no flush yet
 
+    assert len(gcal_feb_02_2019) == 1
     gcal_feb_02_2019.flush()
     assert len(gcal_feb_02_2019) == 1
     assert len(new_gcal) == 0  # Still no flush
@@ -134,4 +125,3 @@ def test_create_event(gcal_feb_02_2019, feb_02_2019, gcal_api):
     new_gcal.flush()
     gcal_feb_02_2019.flush()
     assert len(gcal_feb_02_2019) == 0
-    assert not gcal_feb_02_2019.span.is_finite()

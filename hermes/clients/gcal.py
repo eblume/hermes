@@ -21,6 +21,7 @@ from typing import (
 import warnings
 
 from appdirs import user_data_dir
+from google.auth.transport import Request
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -76,6 +77,16 @@ class GoogleClient:
         # TODO - refresh? is valid check?
         return self._credentials
 
+    @property
+    def access_token(self) -> Dict[str, Any]:
+        return {
+            "access_token": self.credentials.token,
+            "refresh_token": self.credentials.refresh_token,
+            "token_uri": self.SERVICE_TOKEN_URL,
+            "client_id": self.credentials.client_id,
+            "client_secret": self.credentials.client_secret,
+        }
+
     def write_authorized_user_file(
         self, file: Path = None, redirect_uris: List[str] = None
     ) -> None:
@@ -118,38 +129,53 @@ class GoogleClient:
 
         No default path is given to force you to think about this. :)
         """
-        data = {
-            "access_token": self.credentials.token,
-            "refresh_token": self.credentials.refresh_token,
-            "token_uri": self.SERVICE_TOKEN_URL,
-            "client_id": self.credentials.client_id,
-            "client_secret": self.credentials.client_secret,
-        }
-        file.write_text(json.dumps(data))
+        file.write_text(json.dumps(self.access_token))
 
     @classmethod
     def from_access_token(
         cls: Type[T],
-        access_token: str,
+        access_token: str = None,
         refresh_token: str = None,
         token_uri: str = SERVICE_TOKEN_URL,
         client_id: str = None,
         client_secret: str = None,
+        write_refreshed_token: Path = None,
     ) -> T:
-        """If the optional fields are all supplied, the token will auto-refresh when expired."""
+        """If the optional fields are all supplied, the token will auto-refresh when expired.
+
+        If the token is refreshed and `write_refreshed_token` is set to a path, that file
+        will be created/overwritten with the refreshed token,
+        """
         credentials = Credentials(
             access_token,
             refresh_token=refresh_token,
             token_uri=token_uri,
             client_id=client_id,
             client_secret=client_secret,
+            scopes=cls.SERVICE_SCOPES,
         )
-        session = AuthorizedSession(credentials)
-        return cls(session, credentials)
+        if not credentials.expired:
+            session = AuthorizedSession(credentials)
+            client = cls(session, credentials)
+        else:
+            credentials.refresh(Request())
+            session = AuthorizedSession(credentials)
+            client = cls(session, credentials)
+            if write_refreshed_token is not None:
+                client.write_access_token_file(write_refreshed_token)
+        return client
 
     @classmethod
-    def from_access_token_file(cls: Type[T], file: Path) -> T:
-        return cls.from_access_token(**json.loads(file.read_text()))
+    def from_access_token_file(cls: Type[T], file: Path, create: bool = False) -> T:
+        if not file.exists() and create:
+            client = cls.from_local_web_server()
+            client.write_access_token_file(file)
+        else:
+            token = json.loads(file.read_text())
+            if create:
+                token["write_refreshed_token"] = file
+            client = cls.from_access_token(**token)
+        return client
 
     @classmethod
     def from_local_web_server(cls: Type[T], secrets_file: Path = None) -> T:
@@ -184,6 +210,7 @@ class GoogleClient:
 
 
 CalendarID = NewType("CalendarID", str)
+primary = CalendarID("primary")
 
 
 class GoogleCalendarAPI:
@@ -214,13 +241,18 @@ class GoogleCalendarAPI:
     def _post(
         self, endpoint: str, params: Dict[str, str] = None, data: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        return self._client.session.post(
-            f"{self.API_PREFIX}/{endpoint}", params=params, data=data
-        ).json()
+        rv = self._client.session.post(
+            f"{self.API_PREFIX}{endpoint}",
+            params=params,
+            data=json.dumps(data),
+            headers={"content-type": "application/json"},
+        )
+        assert rv.status_code == 200
+        return rv.json()
 
     def _delete(self, endpoint: str, params: Dict[str, str] = None) -> None:
         return self._client.session.delete(
-            f"{self.API_PREFIX}/{endpoint}", params=params
+            f"{self.API_PREFIX}{endpoint}", params=params
         )
 
     # Public members
@@ -229,7 +261,7 @@ class GoogleCalendarAPI:
         for item in self._paginated_get("/users/me/calendarList"):
             yield CalendarID(item["id"])
 
-    def calendar_info(self, calendar_id: CalendarID) -> Dict[str, Any]:
+    def calendar_info(self, calendar_id: CalendarID = primary) -> Dict[str, Any]:
         return self._get(f"/calendars/{calendar_id}")
 
     def calendar_info_by_name(self, name: str) -> Dict[str, Any]:
@@ -240,7 +272,9 @@ class GoogleCalendarAPI:
                 return self.calendar_info(item["id"])
         raise KeyError("Specified name was not found", name)
 
-    def create_event(self, tag: Tag, calendar_id: CalendarID) -> Dict[str, Any]:
+    def create_event(
+        self, tag: Tag, calendar_id: CalendarID = primary
+    ) -> Dict[str, Any]:
         if tag.valid_from is None or tag.valid_to is None:
             raise ValueError("Events must have concrete start and end times")
         start: dt.datetime = tag.valid_from
@@ -253,7 +287,7 @@ class GoogleCalendarAPI:
         }
         return self._post(f"/calendars/{calendar_id}/events", data=event)
 
-    def remove_events(self, tag: Tag, calendar_id: CalendarID) -> None:
+    def remove_events(self, tag: Tag, calendar_id: CalendarID = primary) -> None:
         """Remove all events that exactly correspond to this tag."""
         start = tag.valid_from
         end = tag.valid_to
@@ -269,7 +303,7 @@ class GoogleCalendarAPI:
             self._delete(f"/calendars/{calendar_id}/events/{event_info['id']}")
 
     def load_timespan(
-        self, calendar_id: CalendarID = None, span: Span = None
+        self, calendar_id: CalendarID = primary, span: Span = None
     ) -> SqliteTimeSpan:
         return SqliteTimeSpan(tags=self.events(calendar_id, span))
 
@@ -344,7 +378,7 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     def __init__(
         self,
-        calendar_id: CalendarID = CalendarID("primary"),
+        calendar_id: CalendarID = primary,
         load_events: bool = True,
         load_span: Span = None,
         client: GoogleCalendarAPI = None,
@@ -355,6 +389,7 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
         else:
             self.client = client
         self.calendar_id = calendar_id
+        self._span = load_span if load_span is not None else Span(None, None)
 
         calendar_info = self.client.calendar_info(calendar_id)
         self.calendar_name = calendar_info.get(
@@ -362,7 +397,7 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
         )
 
         if load_events:
-            self._cached_timespan = self.client.load_timespan(calendar_id, load_span)
+            self._cached_timespan = self.client.load_timespan(calendar_id, self._span)
         else:
             self._cached_timespan = SqliteTimeSpan()
 
@@ -398,7 +433,7 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
 
     @property
     def span(self) -> Span:
-        return self._cached_timespan.span
+        return self._span
 
     @property
     def category_pool(self) -> BaseCategoryPool:
@@ -442,6 +477,10 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             valid_from=start,
             valid_to=start + duration,
         )
+        if tag.span not in self.span:
+            raise ValueError(
+                "This event isn't within this timespan. Maybe try reslicing?"
+            )
         self.insert_tag(tag)
         return tag
 
@@ -467,4 +506,4 @@ class GoogleCalendarTimeSpan(InsertableTimeSpan, RemovableTimeSpan):
             else:
                 self.client.remove_events(tag=event, calendar_id=self.calendar_id)
         self.dirty_queue.clear()
-        self._cached_timespan = self.client.load_gcal(self.calendar_id)
+        self._cached_timespan = self.client.load_timespan(self.calendar_id, self.span)
