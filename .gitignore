@@ -24,6 +24,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+pip-wheel-metadata/
 
 # Unit test / coverage reports
 htmlcov/
@@ -51,3 +52,6 @@ annotations.json
 
 # poetry.lock - because this is a library, not an app. Kinda?
 poetry.lock
+
+# tags
+tags
