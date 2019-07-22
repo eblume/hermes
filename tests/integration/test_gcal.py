@@ -11,7 +11,13 @@ import pytest
 
 @pytest.fixture(scope="module")
 def gcal_client():
-    return GoogleClient.from_access_token_file(Path("calendar.token"))
+    token_file = Path("calendar.token")
+    if not token_file.exists():
+        client = GoogleClient.from_local_web_server()
+        client.write_access_token_file(token_file)
+    else:
+        client = GoogleClient.from_access_token_file(token_file)
+    return client
 
 
 @pytest.fixture(scope="module")
