@@ -1,0 +1,17 @@
+#!/bin/sh
+
+REALPATH="realpath"
+
+if ! command -v realpath >/dev/null 2>&1; then
+        # Let's support OS X homebrew coreutils without the caveat fix
+        if command -v grealpath >/dev/null 2>&1; then
+                REALPATH="grealpath"
+        else
+                echo >&2 "Hermes requires 'realpath' to run as a script. On OS X, try 'brew install realpath'"
+                exit 1
+        fi
+fi
+
+cd "$(dirname $($REALPATH $0))/.."
+
+exec poetry run hermes-exec $@

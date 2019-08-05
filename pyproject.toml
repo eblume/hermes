@@ -34,7 +34,7 @@ pytest-sugar = "^0"
 tox = "^3.13"
 
 [tool.poetry.scripts]
-hermes = 'hermes.cli:cli'
+hermes-exec = 'hermes.cli:cli'
 [build-system]
 requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"
