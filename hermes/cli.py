@@ -21,7 +21,7 @@ import click
 from dateutil.tz import tzlocal
 
 from .chores import ChoreStore
-from .clients.gcal import GoogleCalendarClient, GoogleCalendarTimeSpan
+from .clients.gcal import GoogleCalendarAPI, GoogleCalendarTimeSpan
 from .schedule import Schedule
 from .span import Span
 from .timespan import date_parse
@@ -52,7 +52,7 @@ class GCalOptions:
     def __init__(self, begins_at, finish_at):
         self.begins_at = begins_at
         self.finish_at = finish_at
-        self.client = GoogleCalendarClient(
+        self.client = GoogleCalendarAPI(
             begins_at=self.begins_at, finish_at=self.finish_at
         )
 
