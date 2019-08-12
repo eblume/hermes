@@ -133,9 +133,11 @@ class Schedule:
         return self.make_timespan(self.model.solve())
 
     def make_timespan(self, solver: cp_model.CpSolver) -> TimeSpan:
-        return TimeSpan(
-            set(
-                Tag(
+        tags = []
+
+        for event in self.events.values():
+            if not event._dont_schedule and solver.Value(event.is_present) == 1:
+                event._tag = Tag(
                     name=event.name,
                     # TODO - category
                     valid_from=datetime.fromtimestamp(
@@ -145,10 +147,8 @@ class Schedule:
                         solver.Value(event.stop_time), timezone.utc
                     ),
                 )
-                for event in self.events.values()
-                if not event._dont_schedule and solver.Value(event.is_present) == 1
-            )
-        )
+                tags.append(event._tag)
+        return TimeSpan(set(tags))
 
     def constrain(
         self, event: "Event", span: FiniteSpan, no_pick_first: Optional[datetime]
@@ -200,6 +200,7 @@ class Event:
         self._by: Optional[time] = None
         self._between: Optional[Tuple[time, time]] = None
         self._after: List["Event"] = []
+        self._tag: Optional[Tag] = None
 
     def not_within(self, model: "ConstraintModel") -> None:
         for other_time, bound in self._not_within:

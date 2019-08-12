@@ -14,4 +14,4 @@ fi
 
 cd "$(dirname $($REALPATH $0))/.."
 
-exec poetry run hermes-exec $@
+exec poetry run hermes-exec "$@"

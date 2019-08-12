@@ -16,20 +16,30 @@ from pathlib import Path
 import random
 from typing import Any, Dict, Optional
 
-from appdirs import user_config_dir
+from appdirs import user_config_dir, user_data_dir
 import click
 from dateutil.tz import tzlocal
 
 from .chores import ChoreStore
-from .clients.gcal import GoogleCalendarAPI, GoogleCalendarTimeSpan
+from .clients.gcal import GoogleClient, GoogleCalendarAPI, GoogleCalendarTimeSpan
 from .schedule import Schedule
-from .span import Span
+from .span import Span, Spannable
 from .timespan import date_parse
 
 
-DEFAULT_CONFIG_FILE = Path(user_config_dir()) / "hermes" / "hermes.ini"
+APP_NAME = "HermesCLI"
+APP_AUTHOR = "Hermes"
 
-DEFAULT_CONFIG = {"hermes": {"gcal calendar": ""}}
+DEFAULT_CONFIG_FILE = (
+    Path(user_config_dir(APP_NAME, APP_AUTHOR)) / "hermes" / "hermes.ini"
+)
+DEFAULT_AUTH_TOKEN_FILE = (
+    Path(user_data_dir(APP_NAME, APP_AUTHOR)) / "hermes" / "gcal.oauth.json"
+)
+
+DEFAULT_CONFIG = {
+    "hermes": {"gcal calendar": "", "gcal token file": str(DEFAULT_AUTH_TOKEN_FILE)}
+}
 
 
 class CallContext:
@@ -48,13 +58,17 @@ class CallContext:
         self.config = parser["hermes"]
 
 
-class GCalOptions:
-    def __init__(self, begins_at, finish_at):
-        self.begins_at = begins_at
-        self.finish_at = finish_at
-        self.client = GoogleCalendarAPI(
-            begins_at=self.begins_at, finish_at=self.finish_at
-        )
+class GCalOptions(Spannable):
+    def __init__(self, begins_at, finish_at, auth_file):
+        self._span = Span(begins_at=begins_at, finish_at=finish_at)
+        if not auth_file.parent.exists():
+            auth_file.parent.mkdir(parents=True, exist_ok=True)
+        gclient = GoogleClient.from_access_token_file(file=auth_file)
+        self.client = GoogleCalendarAPI(client=gclient)
+
+    @property
+    def span(self) -> Span:
+        return self._span
 
 
 pass_call_context = click.make_pass_decorator(CallContext)
@@ -132,7 +146,11 @@ def calendars(
         )
         stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
 
-    context.gcal = GCalOptions(begins_at=start, finish_at=stop)
+    context.gcal = GCalOptions(
+        begins_at=start,
+        finish_at=stop,
+        auth_file=Path(context.config["gcal token file"]),
+    )
     context.target_calendar_id = _make_target_cal(context, calendar, calendar_id)
 
 
@@ -141,7 +159,8 @@ def calendars(
 def callist(context: CallContext) -> None:
     """List all known calendars, and their source."""
     click.secho("Google Calendars:", bold=True)
-    for cal in context.gcal.client.calendars():
+    for cal_id in context.gcal.client.calendars():
+        cal = context.gcal.client.calendar_info(cal_id)
         click.secho(f"{cal['summary']} [{cal['id']}]")
 
 
@@ -156,19 +175,18 @@ def events(context: CallContext, pretty: bool = True) -> None:
     """List all events. Use options to narrow the search. If no calendar is specified, all calendars will be searched."""
 
     if context.target_calendar_id is None:
-        search_cals = [calendar["id"] for calendar in context.gcal.client.calendars()]
+        search_cals = [calendar for calendar in context.gcal.client.calendars()]
     else:
         search_cals = [context.target_calendar_id]
 
-    load_opts = {}
-    if pretty and context.gcal.client.span.is_finite():
-        load_opts["progress"] = _make_progress_iter(context)
+    load_opts = {"span": context.gcal.span}
+    # TODO - progress bar? See _make_progress_iter.
 
     for cal_id in search_cals:
-        cal_data = context.gcal.client.calendar(cal_id)
+        cal_data = context.gcal.client.calendar_info(cal_id)
         if pretty:
             click.secho(f"{cal_data['summary']} [{cal_id}]", bold=True)
-        timespan = context.gcal.client.load_gcal(cal_id, **load_opts)
+        timespan = context.gcal.client.load_timespan(cal_id, **load_opts)
         if pretty:
             click.secho(f"Found {len(timespan)} events.")
         for event in timespan.iter_tags():
@@ -192,7 +210,9 @@ def clear(context, yes):
             "When clearing a schedule, you must specify one (and only one) calendar."
         )
     gcal = GoogleCalendarTimeSpan(
-        client=context.gcal.client, calendar_id=context.target_calendar_id
+        client=context.gcal.client,
+        calendar_id=context.target_calendar_id,
+        load_span=context.gcal.span,
     )
     click.secho("Events:")
     for event in gcal.iter_tags():
@@ -230,10 +250,12 @@ def clear(context, yes):
 def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
     if context.target_calendar_id is None:
         raise click.UsageError(
-            "When clearing a schedule, you must specify one (and only one) calendar."
+            "When building a schedule, you must specify one (and only one) calendar."
         )
     gcal = GoogleCalendarTimeSpan(
-        client=context.gcal.client, calendar_id=context.target_calendar_id
+        client=context.gcal.client,
+        calendar_id=context.target_calendar_id,
+        load_span=context.gcal.span,
     )
 
     slot_list = []
@@ -245,7 +267,7 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
         (e for e in events if e.valid_to >= now), key=attrgetter("valid_from")
     )
 
-    if now >= context.gcal.finish_at:
+    if now >= context.gcal.span.finish_at:
         raise click.UsageError(
             "Your target date range for scheduling must be in the future."
         )
@@ -262,7 +284,7 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
     pre_existing_calendars = list(check_calendar_id)
     for calendar_name in check_calendar:
         pre_existing_calendars.append(
-            context.gcal.client.calendar_by_name(calendar_name)["id"]
+            context.gcal.client.calendar_info_by_name(calendar_name)["id"]
         )
 
     loaded_calendars = [
@@ -270,7 +292,8 @@ def whatsnext(context, schedules, slots, check_calendar, check_calendar_id):
     ]
 
     span = Span(
-        begins_at=max(context.gcal.begins_at, now), finish_at=context.gcal.finish_at
+        begins_at=max(context.gcal.span.begins_at, now),
+        finish_at=context.gcal.span.finish_at,
     )
 
     unfeasible_count = 0
@@ -384,12 +407,12 @@ def _make_target_cal(context, calendar, calendar_id) -> str:
             "You must specify only one of --calendar and --calendar-id, not both. You may also specify a default in the hermes config file."
         )
     elif calendar is not None:
-        return context.gcal.client.calendar_by_name(calendar)["id"]
+        return context.gcal.client.calendar_info_by_name(calendar)["id"]
     elif calendar_id is not None:
         return calendar_id
     elif context.config.get("gcal calendar"):
         # Retrieve calendar from config if set in config
-        return context.gcal.client.calendar_by_name(
+        return context.gcal.client.calendar_info_by_name(
             context.config.get("gcal calendar")
         )["id"]
     return None
@@ -412,9 +435,7 @@ def _make_progress_iter(context):
         "show_eta": False,
         "show_pos": True,
     }
-    progress_options["length"] = (
-        context.gcal.finish_at - context.gcal.begins_at
-    ).total_seconds()
+    progress_options["length"] = context.gcal.span.duration.total_seconds()
     return partial(click.progressbar, **progress_options)
 
 

@@ -26,6 +26,7 @@ from google.auth.transport import Request
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from requests.utils import quote  # type: ignore    # mypy, plz....
 
 from ..categorypool import BaseCategoryPool
 from ..span import Span
@@ -37,14 +38,6 @@ from ..timespan import (
     RemovableTimeSpan,
     SqliteTimeSpan,
 )
-
-# POSSIBLE, BUT NOT IMPLEMENTED AT THIS TIME:
-# AppEngine auto-credentials
-# Impersonated credentials
-# ServiceAccount credentials
-# Mobile account flow
-# Legacy account flow
-# Web app flow TODO
 
 
 class GoogleClient:
@@ -272,7 +265,7 @@ class GoogleCalendarAPI:
             yield CalendarID(item["id"])
 
     def calendar_info(self, calendar_id: CalendarID = primary) -> Dict[str, Any]:
-        return self._get(f"/calendars/{calendar_id}")
+        return self._get(f"/calendars/{quote(calendar_id)}")
 
     def calendar_info_by_name(self, name: str) -> Dict[str, Any]:
         for item in self._paginated_get("/users/me/calendarList"):
@@ -295,7 +288,7 @@ class GoogleCalendarAPI:
             "start": {"dateTime": start.isoformat(), "timeZone": start.tzname()},
             "end": {"dateTime": end.isoformat(), "timeZone": end.tzname()},
         }
-        return self._post(f"/calendars/{calendar_id}/events", data=event)
+        return self._post(f"/calendars/{quote(calendar_id)}/events", data=event)
 
     def remove_events(self, tag: Tag, calendar_id: CalendarID = primary) -> None:
         """Remove all events that exactly correspond to this tag."""
@@ -307,10 +300,12 @@ class GoogleCalendarAPI:
             end = end.astimezone(start.tzinfo)
 
         for event_info in self._paginated_get(
-            f"/calendars/{calendar_id}/events",
+            f"/calendars/{quote(calendar_id)}/events",
             params={"timeMax": end.isoformat(), "timeMin": start.isoformat()},
         ):
-            self._delete(f"/calendars/{calendar_id}/events/{event_info['id']}")
+            self._delete(
+                f"/calendars/{quote(calendar_id)}/events/{quote(event_info['id'])}"
+            )
 
     def load_timespan(
         self, calendar_id: CalendarID = primary, span: Span = None
@@ -358,7 +353,7 @@ class GoogleCalendarAPI:
                 query_params["timeMax"] = finish_at
 
             for event in self._paginated_get(
-                f"/calendars/{calendar_id}/events", params=query_params
+                f"/calendars/{quote(calendar_id)}/events", params=query_params
             ):
                 start = event.get("start")
                 end = event.get("end")
