@@ -244,7 +244,6 @@ class ChoreSchedule(Schedule):
 
     def _update_tag_for_chore(self, tag: Tag, chore: Chore) -> Tag:
         # TODO duration change? Unclear
-        # TODO mark chore as 'done'? ehhh
         return Tag(
             name=chore.name,
             valid_from=tag.valid_from,

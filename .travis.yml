@@ -10,5 +10,5 @@ install:
     - poetry install
 
 script:
-    - poetry run python -m pytest --ignore tests/integration
+    - poetry run tox
     - black --check

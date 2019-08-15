@@ -192,7 +192,11 @@ def test_can_schedule_with_unknown_preexisting_events(example_daily_schedule, a_
     )
     schedule = example_daily_schedule()
     schedule.schedule()
-    scheduled_events = list(schedule.populate(a_day, [pre_existing_events]).iter_tags())
+    scheduled_events = list(
+        schedule.populate(
+            a_day, pre_existing_timespans=[pre_existing_events]
+        ).iter_tags()
+    )
 
     assert len(scheduled_events) == 12
     for event in scheduled_events:
@@ -211,7 +215,11 @@ def test_can_schedule_with_known_preexisting_events(example_daily_schedule, a_da
 
     schedule = example_daily_schedule()
     schedule.schedule()
-    scheduled_events = list(schedule.populate(a_day, [pre_existing_events]).iter_tags())
+    scheduled_events = list(
+        schedule.populate(
+            a_day, pre_existing_timespans=[pre_existing_events]
+        ).iter_tags()
+    )
 
     assert len(scheduled_events) == 12
     for event in scheduled_events:
