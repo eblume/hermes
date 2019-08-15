@@ -20,19 +20,25 @@ class Frequency(Variable):
         minimum: dt.timedelta = dt.timedelta.resolution,
         maximum: dt.timedelta = dt.timedelta.max,
     ):
+        self.mean = mean
         if tolerance is None:
             # TODO - can we pick a default 'tolerance' interval better than this?
             # perhaps with norm.alpha() somehow?
-            tolerance = dt.timedelta(seconds=mean.seconds * 0.1)
+            self.tolerance = dt.timedelta(seconds=mean.seconds * 0.1)
+        else:
+            self.tolerance = tolerance
 
-        self._dist = norm(loc=mean.total_seconds(), scale=tolerance.total_seconds())
-        self._min = minimum
-        self._max = maximum
+        self.min = minimum
+        self.max = maximum
+
+    @property
+    def dist(self):
+        return norm(loc=self.mean.total_seconds(), scale=self.tolerance.total_seconds())
 
     def tension(self, elapsed: dt.timedelta) -> float:
         """Return a value on in [0, 1] representing how 'tense' this frequency is.
         At exactly the mean frequency, the returned value will be exactly 0.5."""
-        if not self._min < elapsed < self._max:
+        if not self.min < elapsed < self.max:
             return 0
 
-        return self._dist.cdf(elapsed.total_seconds())
+        return self.dist.cdf(elapsed.total_seconds())

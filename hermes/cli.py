@@ -36,9 +36,16 @@ DEFAULT_CONFIG_FILE = (
 DEFAULT_AUTH_TOKEN_FILE = (
     Path(user_data_dir(APP_NAME, APP_AUTHOR)) / "hermes" / "gcal.oauth.json"
 )
+DEFAULT_CHORE_STORE_FILE = (
+    Path(user_data_dir(APP_NAME, APP_AUTHOR)) / "hermes" / "gcal.oauth.json"
+)
 
 DEFAULT_CONFIG = {
-    "hermes": {"gcal calendar": "", "gcal token file": str(DEFAULT_AUTH_TOKEN_FILE)}
+    "hermes": {
+        "gcal calendar": "",
+        "gcal token file": str(DEFAULT_AUTH_TOKEN_FILE),
+        "chore store": str(DEFAULT_CHORE_STORE_FILE),
+    }
 }
 
 

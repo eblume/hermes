@@ -92,9 +92,12 @@ class Schedule:
     def populate(
         self,
         span: FiniteSpan,
+        *args,
         pre_existing_timespans: Optional[Iterable[BaseTimeSpan]] = None,
         no_pick_first: Optional[Dict[str, datetime]] = None,
+        **kwargs,
     ) -> TimeSpan:
+        assert len(args) == len(kwargs) == 0
         if no_pick_first is None:
             _no_pick_first: Dict[EventName, datetime] = {}
         else:

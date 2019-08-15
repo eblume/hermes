@@ -6,7 +6,7 @@ from hermes.span import Span
 from hermes.tag import Tag
 from hermes.timespan import TimeSpan
 from hermes.stochastics import Frequency
-from hermes.chores import ChoreSchedule, Chore
+from hermes.chores import ChoreSchedule, Chore, ChoreStore
 import pytest
 
 
@@ -85,20 +85,30 @@ class MyDailySchedule(DailySchedule):
             self.not_within(metamucil, meal, td(minutes=30))
 
 
+@pytest.fixture
+def chores():
+    return [
+        Chore(name="Example chore A", frequency=Frequency(minimum=td(days=3))),
+        Chore(
+            name="Example chore B",
+            duration=td(minutes=5),
+            frequency=Frequency(mean=td(hours=1)),
+        ),
+    ]
+
+
+@pytest.fixture(scope="function")
+def chore_store(chores):
+    store = ChoreStore()
+    for chore in chores:
+        store.add_chore(chore)
+    return store
+
+
 class MyDailyChoreSchedule(MyDailySchedule, ChoreSchedule):
     def schedule(self):
         super().schedule()
         self.add_chore_slots(limit=3, duration=td(minutes=15))
-        self.add_chore(
-            Chore(name="Example chore A", frequency=Frequency(minimum=td(days=3)))
-        )
-        self.add_chore(
-            Chore(
-                name="Example chore B",
-                duration=td(minutes=5),
-                frequency=Frequency(mean=td(hours=1)),
-            )
-        )
 
 
 @pytest.fixture
@@ -217,10 +227,10 @@ def test_records_subclass_schedules(example_daily_schedule, a_day):
     assert len(list(new_schedule.populate(a_day).iter_tags())) == 12
 
 
-def test_can_schedule_with_chores(daily_schedule_with_choreslots, a_day):
+def test_can_schedule_with_chores(daily_schedule_with_choreslots, chore_store, a_day):
     schedule = daily_schedule_with_choreslots()
     schedule.schedule()
-    scheduled_events = list(schedule.populate(a_day).iter_tags())
+    scheduled_events = list(schedule.populate(a_day, chore_store).iter_tags())
     not_chore_events = [
         event for event in scheduled_events if "chore" not in event.name
     ]
