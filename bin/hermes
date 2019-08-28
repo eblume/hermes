@@ -12,6 +12,10 @@ if ! command -v realpath >/dev/null 2>&1; then
         fi
 fi
 
-cd "$(dirname $($REALPATH $0))/.."
+HERE="$(dirname $($REALPATH $0))/.."
+
+cd $HERE
+
+export PYTHONPATH="${PYTHONPATH}:${HERE}"
 
 exec poetry run hermes-exec "$@"

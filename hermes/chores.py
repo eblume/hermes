@@ -2,6 +2,7 @@
 import datetime as dt
 from enum import Enum
 from pathlib import Path
+from typing import Iterable
 
 import apsw
 
@@ -42,42 +43,43 @@ class Chore:
 
 class ChoreStore:
     def __init__(self, filename: Path = None):
+        self.filename = filename
         if filename is None:
             self._sqlite_db = apsw.Connection(":memory:")
-            with self._sqlite_db:
-                conn = self._sqlite_db.cursor()
-                self._create_tables(conn)
         else:
             self._sqlite_db = apsw.Connection(str(filename))
+        self._create_tables()
 
-    def _create_tables(self, conn) -> None:
-        conn.execute(
-            """
-            CREATE TABLE chores (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                duration NUMBER,
-                freq_mean NUMBER,
-                freq_tolerance NUMBER,
-                freq_min NUMBER,
-                freq_max NUMBER,
-                active INTEGER NOT NULL
+    def _create_tables(self) -> None:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chores (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    duration NUMBER,
+                    freq_mean NUMBER,
+                    freq_tolerance NUMBER,
+                    freq_min NUMBER,
+                    freq_max NUMBER,
+                    active INTEGER NOT NULL
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE chore_instances (
-                id INTEGER PRIMARY KEY,
-                chore_id INTEGER NOT NULL,
-                status INTEGER NOT NULL,
-                updated DATETIME NOT NULL,
-                FOREIGN KEY(chore_id) REFERENCES chores(id)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chore_instances (
+                    id INTEGER PRIMARY KEY,
+                    chore_id INTEGER NOT NULL,
+                    status INTEGER NOT NULL,
+                    updated DATETIME NOT NULL,
+                    FOREIGN KEY(chore_id) REFERENCES chores(id)
+                )
+                """
             )
-            """
-        )
 
-    def write_to(self, filename: Path) -> None:
+    def write_to(self, filename: Path, continue_with_copy: bool = None) -> None:
         if filename.exists():
             raise ValueError("File already exists", filename)
 
@@ -86,7 +88,8 @@ class ChoreStore:
         with file_db.backup("main", self._sqlite_db, "main") as backup:
             backup.step()
 
-        self._sqlite_db = file_db
+        if continue_with_copy or (continue_with_copy is None and self.filename is None):
+            self._sqlite_db = file_db
 
     def add_chore(self, chore: Chore) -> None:
         with self._sqlite_db:
@@ -192,6 +195,37 @@ class ChoreStore:
                 """
             )
             return list(result)[0][0]
+
+    def __iter__(self) -> Iterable[Chore]:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            result = conn.execute(
+                """
+                SELECT
+                    c.name as name,
+                    c.duration as duration,
+                    c.freq_mean as mean,
+                    c.freq_tolerance as tolerance
+                FROM chores AS c
+                WHERE
+                    c.active=1
+                """
+            )
+            for row in result:
+                name = row[0]
+                duration = dt.timedelta(seconds=row[1])
+                mean = dt.timedelta(seconds=row[2])
+                tolerance = dt.timedelta(seconds=row[3])
+
+                freq = Frequency(mean=mean, tolerance=tolerance)
+                yield Chore(name, frequency=freq, duration=duration)
+
+    def reset(self) -> None:
+        with self._sqlite_db:
+            conn = self._sqlite_db.cursor()
+            conn.execute("DROP TABLE IF EXISTS chores")
+            conn.execute("DROP TABLE IF EXISTS chore_instances")
+        self._create_tables()
 
 
 class ChoreSchedule(Schedule):
