@@ -266,8 +266,15 @@ def clear(context, yes):
     help="Path to a python file containing schedule definitions to load.",
     multiple=True,
 )
+@click.option(
+    "--chore-store",
+    type=click.Path(),
+    default=None,
+    envvar="HERMES_CHORE_STORE",
+    help="Path to a 'chore store' file. Will be created if it does not exist. A reasonable default is provided according to your operating system.",
+)
 @pass_call_context
-def whatsnext(context, schedule, slots, check_calendar, check_calendar_id):
+def whatsnext(context, schedule, slots, check_calendar, check_calendar_id, chore_store):
     if context.target_calendar_id is None:
         raise click.UsageError(
             "When building a schedule, you must specify one (and only one) calendar."
@@ -276,6 +283,13 @@ def whatsnext(context, schedule, slots, check_calendar, check_calendar_id):
         client=context.gcal.client,
         calendar_id=context.target_calendar_id,
         load_span=context.gcal.span,
+    )
+
+    # TODO - hack to have chore stores in calendar command. Rethink this.
+    store = ChoreStore(
+        context.config.get("chore store", None)
+        if chore_store is None
+        else click.format_filename(chore_store)
     )
 
     slot_list = []
@@ -310,7 +324,10 @@ def whatsnext(context, schedule, slots, check_calendar, check_calendar_id):
         )
 
     loaded_calendars = [
-        context.gcal.client.load_gcal(cal) for cal in pre_existing_calendars
+        GoogleCalendarTimeSpan(
+            client=context.gcal.client, calendar_id=cal, load_span=context.gcal.span
+        )
+        for cal in pre_existing_calendars
     ]
 
     span = Span(
@@ -340,7 +357,10 @@ def whatsnext(context, schedule, slots, check_calendar, check_calendar_id):
 
         try:
             plan = schedule.populate(
-                span, loaded_calendars, no_pick_first=no_pick_first
+                chore_store=store,
+                span=span,
+                pre_existing_timespans=loaded_calendars,
+                no_pick_first=no_pick_first,
             )
         except ValueError as e:
             print(e)

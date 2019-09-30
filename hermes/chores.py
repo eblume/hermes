@@ -2,15 +2,16 @@
 import datetime as dt
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Tuple
 
 import apsw
+from ortools.sat.python import cp_model
+import pytz
 
-from .schedule import Schedule, Event
+from .schedule import ConstraintModel, EventScoredForSeconds, ScheduleScoredForSeconds
 from .span import FiniteSpan
 from .stochastics import Frequency
 from .tag import Tag
-from .timespan import date_parse, TimeSpan
 
 
 class ChoreStatus(Enum):
@@ -40,6 +41,14 @@ class Chore:
     def tension(self, elapsed: dt.timedelta) -> float:
         return self.frequency.tension(elapsed)
 
+    def tension_solver(
+        self, elapsed: cp_model.IntVar, model: ConstraintModel
+    ) -> cp_model.IntVar:
+        reward = model.make_var("tension reward", lower_bound=cp_model.INT32_MIN)
+        scalar = self.frequency.tension_solver(elapsed, model)
+        model.add(reward == scalar * int(self.duration.total_seconds()))
+        return self.frequency.tension_solver(elapsed, model)
+
 
 class ChoreStore:
     def __init__(self, filename: Path = None):
@@ -62,7 +71,6 @@ class ChoreStore:
                     freq_mean NUMBER,
                     freq_tolerance NUMBER,
                     freq_min NUMBER,
-                    freq_max NUMBER,
                     active INTEGER NOT NULL
                 )
                 """
@@ -73,7 +81,7 @@ class ChoreStore:
                     id INTEGER PRIMARY KEY,
                     chore_id INTEGER NOT NULL,
                     status INTEGER NOT NULL,
-                    updated DATETIME NOT NULL,
+                    updated TIMESTAMP NOT NULL,
                     FOREIGN KEY(chore_id) REFERENCES chores(id)
                 )
                 """
@@ -97,14 +105,13 @@ class ChoreStore:
             conn.execute(
                 """
                 INSERT INTO
-                chores (name, duration, freq_mean, freq_tolerance, freq_min, freq_max, active)
+                chores (name, duration, freq_mean, freq_tolerance, freq_min, active)
                 VALUES (
                     :name,
                     :duration,
                     :freq_mean,
                     :freq_tolerance,
                     :freq_min,
-                    :freq_max,
                     1
                 )
                 """,
@@ -114,18 +121,31 @@ class ChoreStore:
                     "freq_mean": chore.frequency.mean.total_seconds(),
                     "freq_tolerance": chore.frequency.tolerance.total_seconds(),
                     "freq_min": chore.frequency.min.total_seconds(),
-                    "freq_max": chore.frequency.max.total_seconds(),
                 },
             )
 
-    # TODO: Maybe all of this chore-instance code should be removed and
-    # 'scribe' should take its place? IE a chore-only timeline?
+            chore_id = self._sqlite_db.last_insert_rowid()
+            # Record a dummy start time
+            # TODO - fix this hack
+            conn.execute(
+                """
+                INSERT INTO
+                chore_instances (chore_id, status, updated)
+                VALUES (:chore_id, :status, :updated)
+                """,
+                {
+                    "chore_id": chore_id,
+                    "status": ChoreStatus.COMPLETED.value,
+                    "updated": dt.datetime.now(pytz.utc).timestamp(),
+                },
+            )
 
-    def pick_chore(self, event: Event, tag: Tag) -> Chore:
-        assert tag.valid_from is not None  # True by definition of an event tag
+    def applicable_chores(
+        self, span: FiniteSpan
+    ) -> Iterable[Tuple[Chore, dt.datetime]]:
+        """Iterates over chores which could potentially be done now, ie are 'due'"""
         with self._sqlite_db:
             conn = self._sqlite_db.cursor()
-            chores = []
             result = conn.execute(
                 """
                 SELECT
@@ -134,6 +154,7 @@ class ChoreStore:
                     c.duration as duration,
                     c.freq_mean as mean,
                     c.freq_tolerance as tolerance,
+                    c.freq_min as min,
                     MAX(ci.updated) as updated
                 FROM chores AS c
                 LEFT JOIN chore_instances AS ci
@@ -146,25 +167,24 @@ class ChoreStore:
                 {"canceled_status": ChoreStatus.CANCELED.value},
             )
             for row in result:
-                cid = row[0]
                 name = row[1]
                 duration = dt.timedelta(seconds=row[2])
                 mean = dt.timedelta(seconds=row[3])
                 tolerance = dt.timedelta(seconds=row[4])
-                if row[5] is not None:
-                    updated = date_parse(row[5])
-                    elapsed = tag.valid_from - updated
-                else:
-                    elapsed = dt.timedelta(seconds=0)
+                _min = dt.timedelta(seconds=row[5])
+                updated = (
+                    dt.datetime.fromtimestamp(int(row[6]), tz=pytz.utc)
+                    if row[6]
+                    else span.begins_at
+                )
 
-                freq = Frequency(mean=mean, tolerance=tolerance)
+                # TODO - this filter is broken.... why?
+                if not updated + _min <= span.finish_at:
+                    continue
+
+                freq = Frequency(mean=mean, tolerance=tolerance, minimum=_min)
                 chore = Chore(name, frequency=freq, duration=duration)
-                tension = chore.tension(elapsed)
-                chores.append((tension, chore, cid))
-
-        pick = sorted(chores, key=lambda c: c[0])[0]
-        self.start_chore(pick[2], tag)
-        return pick[1]
+                yield chore, updated
 
     def start_chore(self, cid: int, tag: Tag) -> int:
         assert tag.valid_from is not None  # True by definition of an event tag
@@ -179,7 +199,7 @@ class ChoreStore:
                 {
                     "chore_id": cid,
                     "status": ChoreStatus.ASSIGNED.value,
-                    "updated": tag.valid_from.isoformat(),
+                    "updated": tag.valid_from.timestamp(),
                 },
             )
         return self._sqlite_db.last_insert_rowid()
@@ -228,59 +248,44 @@ class ChoreStore:
         self._create_tables()
 
 
-class ChoreSchedule(Schedule):
-    """Helper class - this schedule type (and its descendants) include a
-    ChoreList, and can have chore times when being scheduled."""
+class ChoreEvent(EventScoredForSeconds):
+    """Helper class - Source of scores of chore scores. Of course."""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._chores = []
-
-    def add_chore_slots(
-        self, limit: int, duration: dt.timedelta = dt.timedelta(hours=1)
+    def __init__(
+        self, *args, chore: Chore = None, updated: dt.datetime = None, **kwargs
     ):
-        """Convenience method to automatically generate up to the specified
-        number of chore slots per generated schedule. Will attempt to schedule
-        as many as is possible."""
-        self._chore_slot_limit = limit
-        self._chore_slot_duration = duration
+        super().__init__(*args, **kwargs)
+        self._chore = chore
+        self._updated = updated
 
-    def populate(
-        self, span: FiniteSpan, chore_store: ChoreStore = None, *args, **kwargs
-    ) -> TimeSpan:
-        assert (
-            chore_store is not None
-        )  # TODO - there needs to be a better way to type this
-        chore_events = [
-            self.add_event(
-                name=f"Chore slot {slot}",
-                duration=self._chore_slot_duration,
-                optional=True,
-            )
-            for slot in range(min(self._chore_slot_limit, len(chore_store)))
-        ]
+    def score(self, model: ConstraintModel = None, **kwargs) -> cp_model.IntVar:
+        assert model is not None
+        assert self._chore is not None
+        assert self._updated is not None
+        base_score = super().score(model=model, **kwargs)
+        elapsed = model.make_var(f"{self._chore.name} elapsed time")
+        model.add(elapsed == self.start_time - int(self._updated.timestamp()))
 
-        schedule = super().populate(span, *args, **kwargs)
+        score = model.make_var(f"{self._chore.name} chore event score")
+        model.add(score == self._chore.tension_solver(elapsed, model) + base_score)
+        return score
 
-        chore_events_by_tag = {
-            event._tag: event for event in chore_events if event._tag is not None
-        }
 
-        newtags = []
-        for tag in schedule.iter_tags():
-            event = chore_events_by_tag.get(tag, None)
-            if event is not None and event in chore_events:
-                chore = chore_store.pick_chore(event, tag)
-                tag = self._update_tag_for_chore(tag, chore)
-            newtags.append(tag)
-
-        return TimeSpan(set(newtags))
-
-    def _update_tag_for_chore(self, tag: Tag, chore: Chore) -> Tag:
-        # TODO duration change? Unclear
-        return Tag(
+class ChoreSchedule(ScheduleScoredForSeconds):
+    def add_chore(self, chore: Chore, updated: dt.datetime):
+        self.add_event(
             name=chore.name,
-            valid_from=tag.valid_from,
-            valid_to=tag.valid_to,
-            category=tag.category,
+            duration=chore.duration,
+            optional=True,  # TODO - optional chores? Maybe?
+            chore=chore,
+            updated=updated,
+            event_class=ChoreEvent,
         )
+
+    def populate(self, span: FiniteSpan = None, **kwargs):  # type: ignore
+        assert span is not None
+        chore_store = kwargs.get("chore_store", None)
+        assert chore_store is not None
+        for chore, updated in chore_store.applicable_chores(span):
+            self.add_chore(chore, updated)
+        return super().populate(span=span, **kwargs)
