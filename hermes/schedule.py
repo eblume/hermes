@@ -63,7 +63,7 @@ class Event:
             days = []
             for i, day in enumerate(span.dates_between()):
                 by_time = int(datetime.combine(day, self._by).timestamp())
-                this_day = model.make_var(f"day_{i}_by_{self.name}", boolean=True)
+                this_day = model.make_var(f"{self.name}_day_{i}_by", boolean=True)
                 model.add(self.stop_time < by_time, sentinel=this_day)
                 days.append(this_day)
             if days:
@@ -78,7 +78,7 @@ class Event:
                 stop = int(datetime.combine(day, daily_stop).timestamp())
                 start_cons = self.start_time > start
                 stop_cons = self.stop_time < stop
-                this_day = model.make_var(f"day_{i}_between_{self.name}", boolean=True)
+                this_day = model.make_var(f"{self.name}_day_{i}_between", boolean=True)
                 model.add(start_cons, sentinel=this_day)
                 model.add(stop_cons, sentinel=this_day)
                 cons.append(this_day)
@@ -92,7 +92,8 @@ class Event:
     def pin_to_tag(self, model: "ConstraintModel", tag: Tag) -> None:
         if not self._pinned:
             model.add(
-                self.start_time == int(cast(datetime, tag.valid_from).timestamp())
+                self.start_time == int(cast(datetime, tag.valid_from).timestamp()),
+                sentinel=self.is_present,
             )
             # In theory, the interval duration should handle the finish_at portion...
             # model.add(self.stop_time == int(cast(datetime, tag.valid_to).timestamp()))
@@ -112,7 +113,7 @@ class Event:
             if event.name == self.name:
                 continue
             other_is_first = model.make_var(
-                f"npf_{self.name}_to_{event.name}", boolean=True
+                f"{self.name}_to_{event.name}_npf", boolean=True
             )
             model.add(self.start_time > event.stop_time, sentinel=other_is_first)
             model.add(event.start_time >= pick_after, sentinel=other_is_first)
@@ -376,7 +377,7 @@ class ConstraintModel:
 
     def add(
         self,
-        expression: cp_model.LinearExpression,
+        expression: cp_model.LinearExpr,
         sentinel: Optional[cp_model.IntVar] = None,
     ) -> None:
         constraint = self._model.Add(expression)
@@ -386,7 +387,7 @@ class ConstraintModel:
     def add_abs(
         self,
         target: cp_model.IntVar,
-        expression: cp_model.LinearExpression,
+        expression: cp_model.LinearExpr,
         sentinel: Optional[cp_model.IntVar] = None,
     ) -> None:
         constraint = self._model.AddAbsEquality(target, expression)
@@ -396,7 +397,7 @@ class ConstraintModel:
     def add_no_overlap(self, events: Iterable["Event"]) -> None:
         self._model.AddNoOverlap(event.interval for event in events)
 
-    def solve(self, timeout: int = 10, with_solution_handler=True) -> cp_model.CpSolver:
+    def solve(self, timeout: int = 30, with_solution_handler=True) -> cp_model.CpSolver:
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = timeout
         if with_solution_handler:
@@ -413,8 +414,10 @@ class ConstraintModel:
         return solver
 
     def _tabulate(self, events: Iterable["Event"]) -> Iterable[cp_model.IntVar]:
-        for i, event in enumerate(events):
-            score = self.make_var(f"score {i}")
+        for event in events:
+            # TODO - what if an event was named ConstraintModel
+            # (sentinel value implication)
+            score = self.make_var(f"ConstraintModel_{event.name}_final_score")
             self.add(score == event.score(model=self), event.is_present)
             self.add(score == 0, event.is_present.Not())
             yield score
@@ -428,16 +431,14 @@ class ConstraintModel:
     def min_equality(
         self, first: cp_model.IntVar, second: cp_model.IntVar
     ) -> cp_model.IntVar:
-        name = f"min({first}, {second})"
-        variable = self.make_var(name)
+        variable = self.make_var(f"ConstraintModel_min_{first}_{second})")
         self._model.AddMinEquality(variable, [first, second])
         return variable
 
     def max_equality(
         self, first: cp_model.IntVar, second: cp_model.IntVar
     ) -> cp_model.IntVar:
-        name = f"max({first}, {second})"
-        variable = self.make_var(name)
+        variable = self.make_var(f"ConstraintModel_max_{first}_{second})")
         self._model.AddMaxEquality(variable, [first, second])
         return variable
 
@@ -446,8 +447,8 @@ class ConstraintModelSolutionHandler(cp_model.CpSolverSolutionCallback):
     """Helper class for debugging purposes"""
 
     def __init__(self, variables: Iterable[cp_model.IntVar]) -> None:
-        super().__init__()
         self.variables = variables
+        super().__init__()
         self.solution_count = 0
         self.updates: List[Dict] = []
 
@@ -455,6 +456,12 @@ class ConstraintModelSolutionHandler(cp_model.CpSolverSolutionCallback):
         update = {
             "solution_count": self.solution_count,
             "objective_value": self.ObjectiveValue(),
+            "best_objective_bound": self.BestObjectiveBound(),
+            "num_booleans": self.NumBooleans(),
+            "num_conflicts": self.NumConflicts(),
+            "num_branches": self.NumBranches(),
+            "wall_time": self.WallTime(),
+            "user_time": self.UserTime(),
             "variables": {
                 variable: self.Value(variable) for variable in self.variables
             },
@@ -464,6 +471,10 @@ class ConstraintModelSolutionHandler(cp_model.CpSolverSolutionCallback):
         from pprint import pprint
 
         pprint(update)
+        # pprint({variable: self.Value(variable)
+        #         for variable in self.variables
+        #         if 'chore' in variable.Name()
+        #         })
 
 
 class EventScoredForSeconds(Event):
@@ -472,8 +483,8 @@ class EventScoredForSeconds(Event):
     """
 
     def score(self, model: ConstraintModel, **kwargs) -> cp_model.IntVar:
-        score = model.make_var(f"{self.name} event score by seconds")
-        model.add(score == self.stop_time - self.start_time)
+        score = model.make_var(f"{self.name}_event_score_by_seconds")
+        model.add(score == self.stop_time - self.start_time, self.is_present)
         return score
 
 

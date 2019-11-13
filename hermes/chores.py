@@ -14,6 +14,11 @@ from .stochastics import Frequency
 from .tag import Tag
 
 
+# When a chore hasn't ever been completed, we take the beginning of the span and
+# go back this many days an use that as the 'last completed' date.
+DEFAULT_CHORE_INTERVAL = dt.timedelta(days=30)
+
+
 class ChoreStatus(Enum):
     ASSIGNED = 1
     COMPLETED = 2
@@ -42,12 +47,16 @@ class Chore:
         return self.frequency.tension(elapsed)
 
     def tension_solver(
-        self, elapsed: cp_model.IntVar, model: ConstraintModel
+        self,
+        name: str,
+        elapsed: cp_model.IntVar,
+        is_present: cp_model.IntVar,
+        model: ConstraintModel,
     ) -> cp_model.IntVar:
-        reward = model.make_var("tension reward", lower_bound=cp_model.INT32_MIN)
-        scalar = self.frequency.tension_solver(elapsed, model)
-        model.add(reward == scalar * int(self.duration.total_seconds()))
-        return self.frequency.tension_solver(elapsed, model)
+        reward = model.make_var(f"{name}_tension_reward", lower_bound=0)
+        scalar = self.frequency.tension_solver(name, elapsed, is_present, model)
+        model.add(reward == scalar * int(self.duration.total_seconds()), is_present)
+        return reward
 
 
 class ChoreStore:
@@ -124,22 +133,6 @@ class ChoreStore:
                 },
             )
 
-            chore_id = self._sqlite_db.last_insert_rowid()
-            # Record a dummy start time
-            # TODO - fix this hack
-            conn.execute(
-                """
-                INSERT INTO
-                chore_instances (chore_id, status, updated)
-                VALUES (:chore_id, :status, :updated)
-                """,
-                {
-                    "chore_id": chore_id,
-                    "status": ChoreStatus.COMPLETED.value,
-                    "updated": dt.datetime.now(pytz.utc).timestamp(),
-                },
-            )
-
     def applicable_chores(
         self, span: FiniteSpan
     ) -> Iterable[Tuple[Chore, dt.datetime]]:
@@ -157,11 +150,10 @@ class ChoreStore:
                     c.freq_min as min,
                     MAX(ci.updated) as updated
                 FROM chores AS c
-                LEFT JOIN chore_instances AS ci
+                LEFT OUTER JOIN chore_instances AS ci
                     ON ci.chore_id=c.id
                 WHERE
-                    c.active=1 AND
-                    (ci.status<>:canceled_status OR ci.chore_id IS NULL)
+                    c.active=1 AND (ci.status IS NULL OR ci.status<>:canceled_status)
                 GROUP BY c.id
                 """,
                 {"canceled_status": ChoreStatus.CANCELED.value},
@@ -175,11 +167,10 @@ class ChoreStore:
                 updated = (
                     dt.datetime.fromtimestamp(int(row[6]), tz=pytz.utc)
                     if row[6]
-                    else span.begins_at
+                    else span.begins_at - DEFAULT_CHORE_INTERVAL
                 )
 
-                # TODO - this filter is broken.... why?
-                if not updated + _min <= span.finish_at:
+                if updated + _min >= span.finish_at:
                     continue
 
                 freq = Frequency(mean=mean, tolerance=tolerance, minimum=_min)
@@ -263,11 +254,17 @@ class ChoreEvent(EventScoredForSeconds):
         assert self._chore is not None
         assert self._updated is not None
         base_score = super().score(model=model, **kwargs)
-        elapsed = model.make_var(f"{self._chore.name} elapsed time")
+        elapsed = model.make_var(f"{self._chore.name}_elapsed_time")
         model.add(elapsed == self.start_time - int(self._updated.timestamp()))
 
-        score = model.make_var(f"{self._chore.name} chore event score")
-        model.add(score == self._chore.tension_solver(elapsed, model) + base_score)
+        score = model.make_var(f"{self._chore.name}_chore_event_score")
+        model.add(
+            score
+            == self._chore.tension_solver(
+                self._chore.name, elapsed, self.is_present, model
+            )
+            + base_score
+        )
         return score
 
 
@@ -276,7 +273,7 @@ class ChoreSchedule(ScheduleScoredForSeconds):
         self.add_event(
             name=chore.name,
             duration=chore.duration,
-            optional=True,  # TODO - optional chores? Maybe?
+            optional=False,
             chore=chore,
             updated=updated,
             event_class=ChoreEvent,
