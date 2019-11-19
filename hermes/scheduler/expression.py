@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 from enum import Enum
-from typing import Optional, cast, TYPE_CHECKING
+from typing import Optional, cast, Union, TYPE_CHECKING
 
 from ortools.sat.python import cp_model
 
+
 if TYPE_CHECKING:
-    from .schedule import Model, Event
+    from .schedule import Model, EventBase, Event
 
 
 class Action(Enum):
@@ -28,8 +29,8 @@ class Action(Enum):
 
     def apply(
         self,
-        model: Model,
-        event: Event,
+        model: "Model",
+        event: "Event",
         sentinel: "Variable",
         *action_args: "Expression",
     ) -> cp_model.LinearExpr:
@@ -37,55 +38,95 @@ class Action(Enum):
 
 
 class Expression:
-    def __init__(self, action: Action, *arguments: "Expression"):
+    def __init__(self, action: Action, *arguments: Union["Expression", "EventBase"]):
         self._args = arguments
         self._action = action
 
     def apply(
-        self, model: Model, event: Event, sentinel: "Variable"
+        self, model: "Model", event: "EventBase", sentinel: "Variable"
     ) -> cp_model.LinearExpr:
-        return self._action.apply(model, event, sentinel, *self._args)
+        pass
+        # TODO - finish this
+        # return self._action.apply(model, event, sentinel, *self._args)
 
-    def __lt__(self, other: "Expression") -> "Expression":
+    # WAIT, WHAT? Why all the crazy type safety code and then just type:
+    # ignore? I'll tell you why, dear reader! Or better yet, GVR himself
+    # will tell you!: https://github.com/python/mypy/issues/6710
+    #
+    # And let this be the lesson: before you design a type-safe DSL, check
+    # that your language allows Liskov Substitution Principle violation on
+    # your DSL's operators. d'oh.
+    #
+    # (Ironically, this issue strikes at the core of the TimeSpan re-slicing
+    # syntax too :( ... turns out, LSP is pretty important, I guess? Did
+    # someone a haskell?)
+
+    def __lt__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.LESS_THAN, self, other)
 
-    def __gt__(self, other: "Expression") -> "Expression":
+    def __gt__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.GREATER_THAN, self, other)
 
-    def __lte__(self, other: "Expression") -> "Expression":
+    def __lte__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.LESS_THAN_EQ, self, other)
 
-    def __gte__(self, other: "Expression") -> "Expression":
+    def __gte__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.GREATER_THAN_EQ, self, other)
 
-    def __neg__(self, other: "Expression") -> "Expression":
+    def __neg__(self, other: "Expression") -> "Expression":  # type: ignore
         return Expression(Action.NOT, self, other)
 
-    def __add__(self, other: "Expression") -> "Expression":
+    def __add__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.ADD, self, other)
 
-    def __sub__(self, other: "Expression") -> "Expression":
+    def __sub__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.SUBTRACT, self, other)
 
-    def __and__(self, other: "Expression") -> "Expression":
+    def __and__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.AND, self, other)
 
-    def __or__(self, other: "Expression") -> "Expression":
+    def __or__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.OR, self, other)
 
-    def __xor__(self, other: "Expression") -> "Expression":
+    def __xor__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.XOR, self, other)
 
-    def __eq__(self, other: "Expression") -> "Expression":
+    def __eq__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.EQUALS, self, other)
 
-    def __ne__(self, other: "Expression") -> "Expression":
+    def __ne__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.NOT_EQUALS, self, other)
 
-    def __mul__(self, other: "Expression") -> "Expression":
+    def __mul__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.MULTIPLY, self, other)
 
-    def __abs__(self, other: "Expression") -> "Expression":
+    def __abs__(self, other: "Expression") -> "Expression":  # type: ignore
+        if not isinstance(other, Expression):
+            return NotImplemented
         return Expression(Action.ABSOLUTE, self, other)
 
 
@@ -113,8 +154,8 @@ class Variable(Expression):
 
 
 class Constant(Variable):
-    def __init__(self, value: int):
-        super().__init__()
+    def __init__(self, name: str, value: int):
+        super().__init__(name)
         self._value = value
 
     def apply(self, *_) -> cp_model.LinearExpr:

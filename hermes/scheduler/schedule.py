@@ -2,7 +2,7 @@
 import datetime as dt
 from typing import Iterable, List, TYPE_CHECKING
 
-from .expression import Variable, Expression
+from .expression import Variable, Expression, Constant
 from ..span import FiniteSpan
 from ..tag import Tag
 from ..timespan import TimeSpan
@@ -36,8 +36,8 @@ class EventBase:
         self._external = external
         self._constraints: List["EventConstraint"] = []
 
-        # TODO - Is there a better way perhaps to introduce the IntervalOverlap constraint
-        # that supports polymorphism?
+        # TODO - Is there a better way perhaps to introduce the IntervalOverlap
+        # constraint that supports polymorphism?
         if not external:
             # TODO - figure out this circular import roadbump
             from .constraint import IntervalOverlap
@@ -46,17 +46,17 @@ class EventBase:
 
     @classmethod
     def from_tag(cls, tag: Tag):
-        pass
+        pass  # TODO`
 
     def combine(self, other: "Event") -> "Event":
         """Returns a new event with combined metadata."""
-        pass
+        pass  # TODO
 
     @property
     def external(self) -> bool:
         return self._external
 
-    def bake(self, model: Model, span: FiniteSpan) -> None:
+    def bake(self, model: "Model", span: FiniteSpan) -> None:
         """Binds all unbound variables belonging to the event to the model, and
         sets all registered constraints."""
         model.make_var(self.start_time, span)
@@ -102,9 +102,13 @@ class Event(EventBase):
     # TODO - check Variable.resolve() syntax in comment above when API has finalized
 
     def in_(self, span: FiniteSpan) -> "EventConstraint":
-        expression = (self.start_time > span.begins_at) and (
-            self.stop_time < span.finish_at
+        begins_at = Constant(
+            f"{self.name}_in_span_left", int(span.begins_at.timestamp())
         )
+        finish_at = Constant(
+            f"{self.name}_in_span_right", int(span.finish_at.timestamp())
+        )
+        expression = (self.start_time > begins_at) and (self.stop_time < finish_at)
         return EventConstraint(self, expression)
 
 
@@ -143,8 +147,8 @@ class ScheduleItem:
 class Schedule:
     def __init__(self, name: str, context: TimeSpan):
         self._context = context.filter(
-            "Hermes" / name
-        )  # TODO: filter name normalization? At least test it.
+            "Hermes" / name  # type: ignore
+        )  # TODO: filter name normalization? At least test it.  ( also new todo: fix type issue )
         self._name = name
         self._schedule_items: List[ScheduleItem] = []
 
@@ -154,7 +158,7 @@ class Schedule:
     def events(self, span: FiniteSpan) -> Iterable[Event]:
         for subspan in self.subspans(span):
             existing_events = {
-                t.name for t in self._context.reslice_with_span(subspan).iter_tags()
+                t.name for t in self._context.slice_with_span(subspan).iter_tags()
             }
             for item in self._schedule_items:
                 for event in item.events(subspan):
@@ -171,13 +175,15 @@ class Schedule:
 
 
 class EventConstraint:
-    def __init__(self, event: Event, constraint: Expression, sentinel: Variable = None):
+    def __init__(
+        self, event: EventBase, constraint: Expression, sentinel: Variable = None
+    ):
         self._event = event
         self._constraint = constraint
         self._sentinel: Variable = sentinel or self._event.is_present
 
     def apply(self, model: "Model") -> None:
         """Apply this constraint to the model."""
-        expr = self._constraint.bake(model, self._event, self._sentinel)
-        sentinel = self._sentinel.bake()
+        expr = self._constraint.apply(model, self._event, self._sentinel)
+        sentinel = self._sentinel.apply()
         model._model.Add(expr).OnlyEnforceIf(sentinel)

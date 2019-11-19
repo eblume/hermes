@@ -7,7 +7,6 @@ from ortools.sat.python import cp_model
 import pytz
 
 from .expression import Variable
-from .constraint import IntervalOverlap
 from .schedule import Event, Schedule
 from ..tag import Tag
 from ..span import FiniteSpan
@@ -38,7 +37,7 @@ class Model:
     def schedule(
         self,
         span: FiniteSpan,
-        *schedules: Iterable[Schedule],
+        *schedules: Schedule,
         context: Iterable[BaseTimeSpan] = None,
         timeout: dt.timedelta = dt.timedelta(seconds=30),
     ) -> SqliteTimeSpan:
@@ -81,15 +80,15 @@ class Model:
             raise ValueError(
                 f"Non-feasible scheduling problem status: {solver.StatusName(status)}"
             )
-        solution = Solution(model, solver)
+        solution = Solution(solver)
 
         new_timespan = SqliteTimeSpan()
         for event in self._events.values():
             if not event.external:
                 # External events by definition already are scheduled
-                tag = self.event_to_tag(event, solution)
-                if tag:
-                    new_timespan.insert_tag(tag)
+                new_tag = self.event_to_tag(event, solution)
+                if new_tag is not None:
+                    new_timespan.insert_tag(new_tag)
         return new_timespan
 
     def event_to_tag(self, event: Event, solution: Solution) -> Optional[Tag]:
@@ -100,13 +99,14 @@ class Model:
         """Returns either the given event (after registering it), or a new
         event that combines existing event info."""
         self._events[event.name].combine(event)
-        self.constrain_event(IntervalOverlap(event))
+        # TODO - figure out this constraint please
+        # self.constrain_event(IntervalOverlap(event))
         return self._events[event.name]
 
     def add_schedule(self, schedule: Schedule, span: FiniteSpan) -> None:
         """Register this schedule on this model"""
-        for schedule_item in schedule.items():
-            for event, subspan in schedule_item.events(span):
+        for schedule_item in schedule._schedule_items:
+            for event in schedule_item.events(span):
                 self.add_event(event)
 
     def bake(self, span: FiniteSpan) -> cp_model.CpModel:
