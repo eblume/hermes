@@ -8,8 +8,8 @@ from dateutil.tz import tzlocal
 
 
 class Spannable(metaclass=abc.ABCMeta):
-    @abc.abstractproperty
     @property
+    @abc.abstractmethod
     def span(self) -> "Span":
         raise NotImplementedError("Subclasses must define this interface")
 

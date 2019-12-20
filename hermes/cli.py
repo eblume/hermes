@@ -24,7 +24,7 @@ from dateutil.tz import tzlocal
 from .chores import Chore, ChoreStore
 from .clients.gcal import GoogleClient, GoogleCalendarAPI, GoogleCalendarTimeSpan
 from .schedule import Schedule
-from .span import Span, Spannable
+from .span import Span
 from .stochastics import Frequency
 from .timespan import date_parse
 
@@ -71,7 +71,7 @@ class CallContext:
         self.config = parser["hermes"]
 
 
-class GCalOptions(Spannable):
+class GCalOptions:
     def __init__(self, begins_at, finish_at, auth_file):
         self._span = Span(begins_at=begins_at, finish_at=finish_at)
         if not auth_file.parent.exists():

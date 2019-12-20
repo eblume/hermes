@@ -78,7 +78,7 @@ class BaseTag(Spannable, metaclass=abc.ABCMeta):
         raise NotImplementedError()
 
     @property
-    def span(self):
+    def span(self) -> "Span":
         return Span(
             self.valid_from or dt.datetime.max, self.valid_to or dt.datetime.max
         )
