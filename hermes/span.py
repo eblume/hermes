@@ -3,11 +3,17 @@ import abc
 import datetime as dt
 from typing import cast, Iterable, Optional
 
+# TODO When we can move properly to CPython 3.8, this can be cleaned up.
+try:
+    from typing import Protocol  # type: ignore
+except ImportError:
+    from typing_extensions import Protocol  # type: ignore
+
 import attr
 from dateutil.tz import tzlocal
 
 
-class Spannable(metaclass=abc.ABCMeta):
+class Spannable(Protocol):
     @property
     @abc.abstractmethod
     def span(self) -> "Span":
