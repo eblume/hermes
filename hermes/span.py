@@ -3,24 +3,21 @@ import abc
 import datetime as dt
 from typing import cast, Iterable, Optional
 
-# TODO When we can move properly to CPython 3.8, this can be cleaned up.
-try:
-    from typing import Protocol  # type: ignore
-except ImportError:
-    from typing_extensions import Protocol  # type: ignore
-
 import attr
 from dateutil.tz import tzlocal
 
 
-class Spannable(Protocol):
+class Spannable:
     @property
     @abc.abstractmethod
     def span(self) -> "Span":
         raise NotImplementedError("Subclasses must define this interface")
 
-    def __contains__(self, other: "Spannable") -> bool:
+    def __contains__(self, other: object) -> bool:
         """`other` overlaps at least in part with this object"""
+        if not isinstance(other, Spannable):
+            return False
+
         self_begins = self.span.begins_at or dt.datetime.min.replace(
             tzinfo=dt.timezone.utc
         )
