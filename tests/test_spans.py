@@ -96,6 +96,8 @@ def test_span_exactly_equal(span_a, span_f):
     # Containment
     assert span_a in span_f
     assert span_f in span_a
+    assert span_a.during(span_f)
+    assert span_f.during(span_a)
 
     # (In)Equality
     assert not span_a < span_f
@@ -111,19 +113,22 @@ def test_span_exactly_equal(span_a, span_f):
 def test_span_containment(span_c, span_d):
     # Ordinality
     assert span_c.before(span_d)
-    assert span_d.after(span_c)
-    assert not span_c.after(span_d)
+    assert not span_d.after(span_c)
+    assert span_c.after(span_d)
     assert not span_d.before(span_c)
 
     # Containment
-    assert span_c not in span_d
+    assert span_c in span_d
     assert span_d in span_c
+    assert span_d.during(span_c)
+    assert not span_c.during(span_d)
 
+    # NB: I'm really not clear on these, actually
     # (In)Equality
-    assert not span_c < span_d
-    assert not span_c <= span_d
-    assert not span_d > span_c
-    assert not span_d >= span_c
+    assert span_c < span_d
+    assert span_c <= span_d
+    assert span_d > span_c
+    assert span_d >= span_c
     assert not span_c == span_d
     assert span_c != span_d
 
@@ -138,8 +143,10 @@ def test_span_contiguous(span_e, span_f):
     assert span_f.before(span_e)
 
     # Containment
-    assert span_e not in span_f
-    assert span_f not in span_e
+    assert span_e in span_f  # They technically overlap for 1 instant
+    assert span_f in span_e  # "
+    assert not span_e.during(span_f)
+    assert not span_f.during(span_e)
 
     # (In)Equality
     assert not span_e < span_f

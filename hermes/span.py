@@ -40,6 +40,23 @@ class Spannable:
         else:
             return True
 
+    def during(self, other: "Spannable") -> bool:
+        """This span is entirely within `other`, IE, is a proper subset."""
+        self_begins = self.span.begins_at or dt.datetime.min.replace(
+            tzinfo=dt.timezone.utc
+        )
+        other_begins = other.span.begins_at or dt.datetime.min.replace(
+            tzinfo=dt.timezone.utc
+        )
+        self_finish = self.span.finish_at or dt.datetime.max.replace(
+            tzinfo=dt.timezone.utc
+        )
+        other_finish = other.span.finish_at or dt.datetime.max.replace(
+            tzinfo=dt.timezone.utc
+        )
+
+        return other_begins <= self_begins and other_finish >= self_finish
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
 class Span(Spannable):
@@ -109,6 +126,20 @@ class Span(Spannable):
         ):
             yield day
             day += dt.timedelta(days=1)
+
+    def before(self, other: "Span") -> bool:
+        if self.begins_at is None:
+            return other.begins_at is not None
+        if other.begins_at is None:
+            return self.begins_at is not None
+        return self.begins_at < other.begins_at
+
+    def after(self, other: "Span") -> bool:
+        if self.finish_at is None:
+            return other.finish_at is not None
+        if other.finish_at is None:
+            return self.finish_at is not None
+        return self.finish_at > other.finish_at
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
