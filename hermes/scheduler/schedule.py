@@ -4,7 +4,7 @@ from typing import Iterable, List, TYPE_CHECKING
 
 from .expression import Variable, Expression, Constant
 from ..span import FiniteSpan
-from ..tag import Tag
+from ..tag import Tag  # , Category
 from ..timespan import TimeSpan
 
 if TYPE_CHECKING:
@@ -145,10 +145,12 @@ class ScheduleItem:
 
 
 class Schedule:
-    def __init__(self, name: str, context: TimeSpan):
-        self._context = context.filter(
-            "Hermes" / name  # type: ignore
-        )  # TODO: filter name normalization? At least test it.  ( also new todo: fix type issue )
+    def __init__(self, name: str, context: TimeSpan = None):
+        if context is None:
+            context = TimeSpan(set())
+
+        # category = Category("Hermes", None) / name
+        self._context = context.filter(name)
         self._name = name
         self._schedule_items: List[ScheduleItem] = []
 

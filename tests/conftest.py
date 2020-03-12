@@ -11,7 +11,7 @@ import pytest
 @pytest.fixture(scope="function")
 def simple_account():
     """Blank account, very simple"""
-    return TimeSpan({})
+    return TimeSpan(set())
 
 
 @pytest.fixture(scope="module")

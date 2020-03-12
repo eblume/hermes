@@ -98,19 +98,24 @@ class TimeSpan(BaseTimeSpan):
     def reslice(
         self, begins_at: Optional[dt.datetime], finish_at: Optional[dt.datetime]
     ) -> "TimeSpan":
-        selfspan = self.span
         newspan = Span(
-            begins_at if begins_at is not None else selfspan.begins_at,
-            finish_at if finish_at is not None else selfspan.finish_at,
+            begins_at if begins_at is not None else self.span.begins_at,
+            finish_at if finish_at is not None else self.span.finish_at,
         )
         tags = {t for t in self.tags if t in newspan}
         return TimeSpan(tags=tags)
 
     @property
     def span(self) -> "Span":
-        tags = sorted(self.tags, key=attrgetter("valid_from"))
-        oldest = min(tags, key=attrgetter("valid_from"))
-        most_recent = max(tags, key=attrgetter("valid_to"))
+        # Note: this is not an efficient way to calculate a span... subclasses
+        # should be smarter. This approach is purposefully naieve.
+        if not self.tags:
+            # TODO - fix this, this is actually an error with the type
+            # hierarchy, we need to have 0-width spans. This will be deferred
+            # until the @dataclass rewrite.
+            raise ValueError("You must only retrieve the span of non-empty TimeSpans.")
+        oldest = min(self.tags, key=attrgetter("valid_from"))
+        most_recent = max(self.tags, key=attrgetter("valid_to"))
         return Span(oldest.valid_from, most_recent.valid_to)
 
     def filter(self, category: Union["Category", str]) -> "BaseTimeSpan":
