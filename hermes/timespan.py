@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import abc
+from dataclasses import dataclass
 import datetime as dt
 import json
 from operator import attrgetter
@@ -7,7 +8,6 @@ from pathlib import Path
 from typing import Any, cast, Iterable, List, Optional, Set, Union
 
 import apsw
-import attr
 from dateutil.parser import parse as date_parse_base
 from dateutil.tz import tzutc
 
@@ -78,7 +78,7 @@ class BaseTimeSpan(Spannable, metaclass=abc.ABCMeta):
             yield self.slice_with_span(subspan)
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+@dataclass(frozen=True)
 class TimeSpan(BaseTimeSpan):
     tags: Set[Tag]
 

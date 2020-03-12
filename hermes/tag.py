@@ -1,25 +1,23 @@
 # -*- coding: utf-8 -*-
 import abc
+from dataclasses import dataclass, field
 import datetime as dt
 import re
 from typing import Any, MutableMapping, Optional, Type, TypeVar
 from uuid import uuid4 as uuid
 
-import attr
-
 from .span import Span, Spannable
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+@dataclass(frozen=True)
 class Category:
-    name: str = attr.ib()
-    parent: Optional["Category"]
+    name: str
+    parent: Optional["Category"] = None
 
-    @name.validator
-    def _check_name(self, _, value: str):
+    def __post_init__(self):
         pattern = r"[a-zA-Z][a-zA-Z0-9:\- ]*$"
-        if not re.match(pattern, value):
-            raise ValueError(f'Category name {value} must match "{pattern}"')
+        if not re.match(pattern, self.name):
+            raise ValueError(f'Category name {self.name} must match "{pattern}"')
 
     def __truediv__(self, other: str):
         """Create a new category as a subcategory of this one.
@@ -105,26 +103,26 @@ class BaseTag(Spannable, metaclass=abc.ABCMeta):
         )
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+@dataclass(frozen=True, order=True)
 class Tag(BaseTag):
     name: str
-    category: Optional[Category] = attr.ib(default=Category("No Category", None))
-    valid_from: Optional[dt.datetime] = attr.ib(default=None)
-    valid_to: Optional[dt.datetime] = attr.ib(default=None)
+    category: Optional[Category] = None
+    valid_from: Optional[dt.datetime] = None
+    valid_to: Optional[dt.datetime] = None
 
 
 _MTagT = TypeVar("_MTagT", bound="MetaTag")
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True)
+@dataclass(frozen=True)
 class MetaTag(BaseTag):
-    """Tag with additional Metadata. Note that the metadata IS mutable."""
+    """Tag with additional Metadata. Note that `data` IS mutable."""
 
     name: str
-    category: Optional[Category] = attr.ib(default=Category("No Category", None))
-    valid_from: Optional[dt.datetime] = attr.ib(default=None)
-    valid_to: Optional[dt.datetime] = attr.ib(default=None)
-    data: MutableMapping[str, Any] = attr.ib(factory=dict)
+    category: Optional[Category] = None
+    valid_from: Optional[dt.datetime] = None
+    valid_to: Optional[dt.datetime] = None
+    data: MutableMapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_tag(

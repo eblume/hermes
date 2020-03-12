@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 import abc
+from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Union, cast
-
-import attr
 
 from .tag import Category
 
@@ -82,7 +81,7 @@ class MutableCategoryPool(BaseCategoryPool):
         return category
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+@dataclass(frozen=True)
 class CategoryPool(BaseCategoryPool):
     """Pool of cached categories, searchable by name
     """

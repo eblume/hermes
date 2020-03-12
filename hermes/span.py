@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 import abc
+from dataclasses import dataclass
 import datetime as dt
 from typing import cast, Iterable, Optional
 
-import attr
 from dateutil.tz import tzlocal
 
 
@@ -58,7 +58,7 @@ class Spannable:
         return other_begins <= self_begins and other_finish >= self_finish
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+@dataclass(frozen=True, order=True)
 class Span(Spannable):
     """A time span, from one time to another.
 
@@ -142,7 +142,7 @@ class Span(Spannable):
         return self.finish_at > other.finish_at
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True, hash=True)
+@dataclass(frozen=True)
 class FiniteSpan(Span):
     """A span that is definitely finite."""
 
