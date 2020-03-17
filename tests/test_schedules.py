@@ -51,6 +51,12 @@ def test_a_reasonable_schedule(basic_schedule_items, a_day):
     # Is each event constrained... properly? Ish?
     for event in events:
         interval_overlaps = [
-            c for c in event._constraints if type(c).__name__ == "IntervalOverlap"
+            c for c in event._constraints if type(c) == IntervalOverlap
         ]
         assert len(interval_overlaps) == 1
+
+
+def test_empty_schedule(a_day):
+    schedule = Schedule("An empty schedule")
+    events = list(schedule.events(a_day))
+    assert len(events) == 0
