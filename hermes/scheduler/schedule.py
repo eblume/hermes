@@ -172,8 +172,9 @@ class Schedule:
         self._name = name
         self._schedule_items: List[ScheduleItem] = []
 
-    def add_schedule_item(self, item: ScheduleItem) -> None:
-        self._schedule_items.append(item)
+    def add_schedule_items(self, *items: ScheduleItem) -> None:
+        for item in items:
+            self._schedule_items.append(item)
 
     def events(self, span: FiniteSpan) -> Iterable[Event]:
         for subspan in self.subspans(span):
