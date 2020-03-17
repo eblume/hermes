@@ -98,3 +98,13 @@ def test_schedules_with_mutual_items(basic_schedule_items, a_day):
     assert event_a.interval == event_b.interval
     assert event_a._constraints == event_b._constraints
     assert event_a.external == event_b.external
+
+    # Check that, for this test, all other events are in fact not equal.
+    unshared_events = [
+        (event_a, event_b)
+        for event_a in events_a
+        for event_b in events_b
+        if event_a.name != event_b.name  # just an inversion of above.
+    ]
+    for event_a, event_b in unshared_events:
+        assert event_a != event_b
