@@ -145,6 +145,24 @@ class ScheduleItem:
 
 
 class Schedule:
+    """A Schedule is a contextual grouping of ScheduleItems that can be used to
+    create an applicable set of properly constrained Events, which can then be
+    converted in to Tags via a Solution (typically provided by a Model).
+
+    Schedules turn ScheduleItems in to (0+) Events. Solutions turn Events in
+    to (0 or 1) Tags.
+
+    Other than assigned ScheduleItems, Schedules are only aware of one other
+    thing: a `context` timespan. The tags of this timespan are available for
+    use in contextual decisionmaking when generating Events.
+
+    All schedules include a notion of 'subspans' aka. 'scheduling windows',
+    which are an abstract notion of "When should I schedule things, if I was
+    told to schedule things during such a span?". An example alternative logic
+    could be a Workday Scheduler that retricts scheduling windows to regular
+    'work hours'.
+    """
+
     def __init__(self, name: str, context: TimeSpan = None):
         if context is None:
             context = TimeSpan(set())
@@ -159,19 +177,17 @@ class Schedule:
 
     def events(self, span: FiniteSpan) -> Iterable[Event]:
         for subspan in self.subspans(span):
-            existing_events = {
+            existing_tag_names = {
                 t.name for t in self._context.slice_with_span(subspan).iter_tags()
             }
             for item in self._schedule_items:
                 for event in item.events(subspan):
-                    if event.name not in existing_events:
-                        # TODO - more robust identity checking, beyond the name? Or maybe context filtering fixes that?
+                    if event.name not in existing_tag_names:
+                        # TODO - additional consistency beyond just name checking?
                         yield event
 
     def subspans(self, span: FiniteSpan) -> Iterable[FiniteSpan]:
-        """Yields all valid scheduling windows over the given span. Note that
-        scheduling windows may exceed the initial span. This method returns all
-        scheduling windows that overlap on any portion with the initial span."""
+        """Yields all valid scheduling windows over the given span"""
         # TODO - include examples/docs on overriding this.
         yield span
 
