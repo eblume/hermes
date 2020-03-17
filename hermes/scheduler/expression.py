@@ -10,15 +10,15 @@ if TYPE_CHECKING:
 
 
 class Action(Enum):
-    LESS_THAN = lambda a, b: a < b
-    GREATER_THAN = lambda a, b: a > b
-    LESS_THAN_EQ = lambda a, b: a <= b
-    GREATER_THAN_EQ = lambda a, b: a >= b
-    AND = lambda a, b: a and b
-    OR = lambda a, b: a or b
-    NOT = lambda a: a.Not()
-    ADD = lambda a, b: a + b
-    SUBTRACT = lambda a, b: a - b
+    LESS_THAN = 1
+    GREATER_THAN = 2
+    LESS_THAN_EQ = 3
+    GREATER_THAN_EQ = 4
+    AND = 5
+    OR = 6
+    NOT = 7
+    ADD = 8
+    SUBTRACT = 9
     XOR = 10
     EQUALS = 11
     NOT_EQUALS = 12
@@ -48,6 +48,9 @@ class Expression:
         pass
         # TODO - finish this
         # return self._action.apply(model, event, sentinel, *self._args)
+
+    def __repr__(self) -> str:
+        return f"EXPR: {self._action}({','.join(map(str,self._args))})"
 
     # WAIT, WHAT? Why all the crazy type safety code and then just type:
     # ignore? I'll tell you why, dear reader! Or better yet, GVR himself

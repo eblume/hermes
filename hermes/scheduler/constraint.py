@@ -9,3 +9,6 @@ class IntervalOverlap(EventConstraint):
 
     def __init__(self, event: EventBase):
         super().__init__(event, Expression(Action.OVERLAP, event))
+
+    def __repr__(self) -> str:
+        return f"IntervalOverlap('{self._event.name}')"

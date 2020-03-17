@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
-from typing import Iterable, List, TYPE_CHECKING
+from typing import Iterable, List, TYPE_CHECKING, Any
 
 from .expression import Variable, Expression, Constant
 from ..span import FiniteSpan
@@ -75,6 +75,22 @@ class EventBase:
 
     def constrain(self, constraint: "EventConstraint") -> None:
         self._constraints.append(constraint)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, type(self)):
+            return False  # TODO - check I didn't get this backwards
+        return all(
+            (
+                self.name == other.name,
+                self.start_time == other.start_time,
+                self.stop_time == other.stop_time,
+                self.is_present == other.is_present,
+                self.interval == other.interval,
+            )
+        )
+
+    def __repr__(self) -> str:
+        return f"Event<'{self.name}', _constraints: {len(self._constraints)}>"
 
 
 class Event(EventBase):
@@ -206,3 +222,21 @@ class EventConstraint:
         expr = self._constraint.apply(model, self._event, self._sentinel)
         sentinel = self._sentinel.apply()
         model._model.Add(expr).OnlyEnforceIf(sentinel)
+
+    def __repr__(self) -> str:
+        return f"EventConstraint<'{self._event.name}', {self._constraint}, {self._sentinel}>"
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, type(self)):
+            return False
+        # Why can't we just compare self._constraint == other._constraint?
+        # Because of the DSL, `self._constraint == other._constraint` returns
+        # a new expression, not a boolean. I may want to rethink this.
+        return all(
+            (
+                self._event == other._event,
+                self._sentinel.name == other._sentinel.name,
+                self._constraint._action == other._constraint._action,
+                self._constraint._args == other._constraint._args,
+            )
+        )

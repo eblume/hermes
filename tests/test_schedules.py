@@ -68,3 +68,33 @@ def test_unrelated_context(basic_schedule_items, complex_timespan, a_day):
     schedule.add_schedule_items(*basic_schedule_items)
     events = list(schedule.events(a_day))
     assert len(events) == 3
+
+
+def test_schedules_with_mutual_items(basic_schedule_items, a_day):
+    schedule_a = Schedule("schedule a")
+    schedule_b = Schedule("schedule b")
+    schedule_a.add_schedule_items(*basic_schedule_items[:2])  # 0, 1
+    schedule_b.add_schedule_items(*basic_schedule_items[1:])  # 1, 2
+
+    events_a = list(schedule_a.events(a_day))
+    events_b = list(schedule_b.events(a_day))
+
+    assert len(events_a) == len(events_b) == 2
+
+    shared_events = [
+        (event_a, event_b)
+        for event_a in events_a
+        for event_b in events_b
+        if event_a.name == event_b.name
+    ]
+    assert len(shared_events) == 1
+
+    event_a, event_b = shared_events[0]
+    assert event_a == event_b  # which should imply:
+    assert event_a.duration == event_b.duration
+    assert event_a.start_time == event_b.start_time
+    assert event_a.stop_time == event_b.stop_time
+    assert event_a.is_present == event_b.is_present
+    assert event_a.interval == event_b.interval
+    assert event_a._constraints == event_b._constraints
+    assert event_a.external == event_b.external
