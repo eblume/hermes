@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import abc
 from dataclasses import dataclass, field
 import datetime as dt
 import re
@@ -42,38 +41,15 @@ class Category:
         return False
 
 
-_BaseTagT = TypeVar("_BaseTagT", bound="BaseTag")
+_TagT = TypeVar("_TagT", bound="Tag")
 
 
-class BaseTag(Spannable, metaclass=abc.ABCMeta):
-    def __init__(
-        self,
-        name: str,
-        category: Optional[Category],
-        valid_from: Optional[dt.datetime],
-        valid_to: Optional[dt.datetime],
-    ):
-        raise NotImplementedError()
-
-    @property
-    @abc.abstractmethod
-    def name(self) -> str:
-        raise NotImplementedError()
-
-    @property
-    @abc.abstractmethod
-    def category(self) -> Optional["Category"]:
-        raise NotImplementedError()
-
-    @property
-    @abc.abstractmethod
-    def valid_from(self) -> Optional[dt.datetime]:
-        raise NotImplementedError()
-
-    @property
-    @abc.abstractmethod
-    def valid_to(self) -> Optional[dt.datetime]:
-        raise NotImplementedError()
+@dataclass(frozen=True, order=True)
+class Tag(Spannable):
+    name: str
+    category: Optional[Category] = None
+    valid_from: Optional[dt.datetime] = None
+    valid_to: Optional[dt.datetime] = None
 
     @property
     def span(self) -> "Span":
@@ -81,17 +57,17 @@ class BaseTag(Spannable, metaclass=abc.ABCMeta):
             self.valid_from or dt.datetime.max, self.valid_to or dt.datetime.max
         )
 
-    def recategorize(self: _BaseTagT, category: Category) -> _BaseTagT:
+    def recategorize(self: _TagT, category: Category) -> _TagT:
         return type(self)(self.name, category, self.valid_from, self.valid_to)
 
     @classmethod
     def from_span(
-        cls: Type[_BaseTagT],
+        cls: Type[_TagT],
         span: Span,
         name: str,
         category: Optional[Category] = None,
         **kwargs,
-    ) -> _BaseTagT:
+    ) -> _TagT:
         if kwargs:
             raise ValueError("Unknown kwargs", kwargs)
 
@@ -103,31 +79,19 @@ class BaseTag(Spannable, metaclass=abc.ABCMeta):
         )
 
 
-@dataclass(frozen=True, order=True)
-class Tag(BaseTag):
-    name: str
-    category: Optional[Category] = None
-    valid_from: Optional[dt.datetime] = None
-    valid_to: Optional[dt.datetime] = None
-
-
 _MTagT = TypeVar("_MTagT", bound="MetaTag")
 
 
 @dataclass(frozen=True)
-class MetaTag(BaseTag):
+class MetaTag(Tag):
     """Tag with additional Metadata. Note that `data` IS mutable."""
 
-    name: str
-    category: Optional[Category] = None
-    valid_from: Optional[dt.datetime] = None
-    valid_to: Optional[dt.datetime] = None
     data: MutableMapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_tag(
         cls: Type[_MTagT],
-        tag: BaseTag,
+        tag: Tag,
         data: MutableMapping[str, Any],
         merge_data: bool = True,
     ) -> _MTagT:
