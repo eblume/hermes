@@ -17,14 +17,16 @@ class Solution:
         self._solver = solver
 
     def resolve(self, event: Event) -> Optional[Tag]:
-        is_present = self._solver.Value(event.is_present)
+        is_present = self._solver.Value(event.is_present._var)
         if not is_present:
             return None
 
         start = dt.datetime.fromtimestamp(
-            self._solver.Value(event.start_time), pytz.utc
+            self._solver.Value(event.start_time._var), pytz.utc
         )
-        stop = dt.datetime.fromtimestamp(self._solver.Value(event.stop_time), pytz.utc)
+        stop = dt.datetime.fromtimestamp(
+            self._solver.Value(event.stop_time._var), pytz.utc
+        )
         # TODO - category?
         return Tag(name=event.name, valid_from=start, valid_to=stop)
 
@@ -32,7 +34,6 @@ class Solution:
 class Model:
     def __init__(self):
         self._events: dict[str, Event] = {}
-        self._model: cp_model.CpModel = None
 
     def schedule(
         self,
@@ -73,7 +74,6 @@ class Model:
 
         # Build ("bake") the model, binding all expressions/variables to the model.
         model = self.bake(span)
-        self._model = model
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = int(timeout.total_seconds())
 
@@ -120,7 +120,20 @@ class Model:
         model = cp_model.CpModel()
         # First, register each variable.
         for event in self._events.values():
-            event.register_variables(model, span)
+            self.make_var(model, event.start_time, span)
+            self.make_var(model, event.stop_time, span)
+            self.make_bool(model, event.is_present)
+            self.make_interval(
+                model,
+                event.interval,
+                event.duration,
+                event.start_time,
+                event.stop_time,
+                event.is_present,
+            )
+
+        # Then, for each event, register its constraints.
+        for event in self._events.values():
             for constraint in event.constraints:
                 model.Add(constraint.expression.apply()).OnlyEnforceIf(
                     constraint.sentinel.apply()
@@ -129,31 +142,28 @@ class Model:
         # One model, fresh from the oven. Ready to be run.
         return model
 
-    def make_var(self, var: "Variable", span: FiniteSpan) -> None:
-        if self._model is None:
-            raise ValueError("This model bust be bake()'d first")
+    def make_var(
+        self, model: cp_model.CpModel, var: "Variable", span: FiniteSpan
+    ) -> None:
         lb = int(span.begins_at.timestamp())
         ub = int(span.finish_at.timestamp())
-        variable = self._model.NewIntVar(lb, ub, var.name)
+        variable = model.NewIntVar(lb, ub, var.name)
         var.bind(variable)
 
-    def make_bool(self, var: "Variable") -> None:
-        if self._model is None:
-            raise ValueError("This model bust be bake()'d first")
-        variable = self._model.NewBoolVar(var.name)
+    def make_bool(self, model: cp_model.CpModel, var: "Variable") -> None:
+        variable = model.NewBoolVar(var.name)
         var.bind(variable)
 
     def make_interval(
         self,
+        model: cp_model.CpModel,
         var: "Variable",
         duration: dt.timedelta,
         start: Variable,
         stop: Variable,
         is_present: Variable,
     ) -> None:
-        if self._model is None:
-            raise ValueError("This model bust be bake()'d first")
-        variable = self._model.NewOptionalIntervalVar(
+        variable = model.NewOptionalIntervalVar(
             start=start._var,
             size=int(duration.total_seconds()),
             end=stop._var,

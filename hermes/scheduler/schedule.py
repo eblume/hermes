@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
-from typing import Iterable, List, TYPE_CHECKING, Any
+from typing import Iterable, List, Any
 
 from .expression import Variable, Expression
 from ..span import FiniteSpan
 from ..tag import Tag  # , Category
 from ..timespan import TimeSpan
-
-if TYPE_CHECKING:
-    # It's not totally clear to me why flake8 needs this, but here we are
-    from .model import Model
 
 
 DEFAULT_EVENT_DURATION = dt.timedelta(minutes=30)
@@ -55,14 +51,6 @@ class Event:
 
         self._external = external
 
-        # TODO - Is there a better way perhaps to introduce the IntervalOverlap
-        # constraint that supports polymorphism?
-        if not external:
-            # TODO - figure out this circular import roadbump
-            from .constraint import IntervalOverlap
-
-            self.constraints.append(IntervalOverlap(self))
-
     @classmethod
     def from_tag(cls, tag: Tag):
         pass  # TODO`
@@ -74,19 +62,6 @@ class Event:
     @property
     def external(self) -> bool:
         return self._external
-
-    def register_variables(self, model: "Model", span: FiniteSpan) -> None:
-        """Binds all unbound variables belonging to the event to the model."""
-        model.make_var(self.start_time, span)
-        model.make_var(self.stop_time, span)
-        model.make_bool(self.is_present)
-        model.make_interval(
-            self.interval,
-            self.duration,
-            self.start_time,
-            self.stop_time,
-            self.is_present,
-        )
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Event):

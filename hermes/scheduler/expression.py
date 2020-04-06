@@ -2,12 +2,12 @@
 from datetime import datetime
 from enum import Enum
 from functools import reduce
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 from ortools.sat.python import cp_model
 
 
-def __special(message):
+def _special(message):
     """Denotes a special action that must be handled outside of the usual flow."""
 
     def _inner(*_):
@@ -23,14 +23,13 @@ class Action(Enum):
     GREATER_THAN_EQ = lambda x, y: x >= y
     AND = lambda x, y: x and y
     OR = lambda x, y: x or y
-    NOT = __special("Negation expressions are a custom action")
+    NOT = _special("Negation expressions are a custom action")
     ADD = lambda x, y: x + y
     SUBTRACT = lambda x, y: x - y
     EQUALS = lambda x, y: x == y
     NOT_EQUALS = lambda x, y: x != y
     MULTIPLY = lambda x, y: x * y
-    IDENTITY = __special("Identity expressions are a custom action")
-    OVERLAP = __special("Overlap constraints are a custom action")
+    IDENTITY = _special("Identity expressions are a custom action")
 
 
 class Expression:
@@ -68,14 +67,12 @@ class Expression:
                 return arg._var
             else:
                 return arg.apply()
-        # elif self._action == Action.OVERLAP:
-        # TODO: Handle Overlap action. Unclear what to do here.
         elif self._action == Action.NOT:
             arg = self._args[0].apply()
             return not arg
-        elif isinstance(self._action.value, type(lambda a, b: 0)):
+        elif isinstance(self._action, type(lambda a, b: 0)):
             args = [arg.apply() for arg in self._args]
-            return reduce(self._action.value, args)
+            return reduce(self._action, args)
         else:
             raise ValueError("Uknown action", self._action)
 
@@ -149,3 +146,6 @@ class Constant(Variable):
         if not isinstance(other, Constant):
             return False
         return self._value == other._value
+
+    def apply(self) -> cp_model.IntVar:
+        return cast(cp_model.IntVar, self._value)
