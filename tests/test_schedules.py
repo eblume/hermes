@@ -4,6 +4,8 @@ from datetime import date
 from hermes.span import Span
 from hermes.scheduler import ScheduleItem, Schedule
 from hermes.scheduler.constraint import IntervalOverlap
+from hermes.scheduler.model import Model
+
 import pytest
 
 
@@ -108,3 +110,10 @@ def test_schedules_with_mutual_items(basic_schedule_items, a_day):
     ]
     for event_a, event_b in unshared_events:
         assert event_a != event_b
+
+
+def test_schedules_with_models(reasonable_schedule, a_day):
+    model = Model()
+    result = model.schedule(a_day, reasonable_schedule)
+    assert False
+    assert result

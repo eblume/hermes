@@ -1,139 +1,116 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
 from enum import Enum
-from typing import Optional, cast, Union, TYPE_CHECKING
+from functools import reduce
+from typing import Any, Optional, Union
 
 from ortools.sat.python import cp_model
 
 
-if TYPE_CHECKING:
-    from .schedule import Model, EventBase, Event
+def __special(message):
+    """Denotes a special action that must be handled outside of the usual flow."""
+
+    def _inner(*_):
+        raise NotImplementedError(message)
+
+    return _inner
 
 
 class Action(Enum):
-    LESS_THAN = 1
-    GREATER_THAN = 2
-    LESS_THAN_EQ = 3
-    GREATER_THAN_EQ = 4
-    AND = 5
-    OR = 6
-    NOT = 7
-    ADD = 8
-    SUBTRACT = 9
-    XOR = 10
-    EQUALS = 11
-    NOT_EQUALS = 12
-    MULTIPLY = 13
-    ABSOLUTE = 14
-    IDENTITY = 15
-    OVERLAP = 16
-
-    def apply(
-        self,
-        model: "Model",
-        event: "Event",
-        sentinel: "Variable",
-        *action_args: "Expression",
-    ) -> cp_model.LinearExpr:
-        return self.value(*[arg.apply(model, event, sentinel) for arg in action_args])
+    LESS_THAN = lambda x, y: x < y
+    GREATER_THAN = lambda x, y: x > y
+    LESS_THAN_EQ = lambda x, y: x <= y
+    GREATER_THAN_EQ = lambda x, y: x >= y
+    AND = lambda x, y: x and y
+    OR = lambda x, y: x or y
+    NOT = __special("Negation expressions are a custom action")
+    ADD = lambda x, y: x + y
+    SUBTRACT = lambda x, y: x - y
+    EQUALS = lambda x, y: x == y
+    NOT_EQUALS = lambda x, y: x != y
+    MULTIPLY = lambda x, y: x * y
+    IDENTITY = __special("Identity expressions are a custom action")
+    OVERLAP = __special("Overlap constraints are a custom action")
 
 
 class Expression:
-    def __init__(self, action: Action, *arguments: Union["Expression", "EventBase"]):
+    """Expressions form the nodes of the tree representing a constraint as an AST.
+    Each expression has an action that resolves that expression, and this is accomplished
+    by using `apply()`. The result is a cp_model Expression that can be added as
+    a constraint.
+
+    To put it another way, the Expression class lets you build up a linear
+    constraint like "y = mx + b", by representing it (here in S-expressions) as:
+
+    (= y (+ (* m x) b))
+
+    Then, once you've built such an expression (and have the root expression
+    that contains it all), you can call `apply` on it to turn that in to a single
+    object that the cp_model engine can use.
+    """
+
+    def __init__(self, action: Action, *arguments: "Expression"):
         self._args = arguments
         self._action = action
-
-    def apply(
-        self, model: "Model", event: "EventBase", sentinel: "Variable"
-    ) -> cp_model.LinearExpr:
-        pass
-        # TODO - finish this
-        # return self._action.apply(model, event, sentinel, *self._args)
 
     def __repr__(self) -> str:
         return f"EXPR: {self._action}({','.join(map(str,self._args))})"
 
-    # WAIT, WHAT? Why all the crazy type safety code and then just type:
-    # ignore? I'll tell you why, dear reader! Or better yet, GVR himself
-    # will tell you!: https://github.com/python/mypy/issues/6710
-    #
-    # And let this be the lesson: before you design a type-safe DSL, check
-    # that your language allows Liskov Substitution Principle violation on
-    # your DSL's operators. d'oh.
-    #
-    # (Ironically, this issue strikes at the core of the TimeSpan re-slicing
-    # syntax too :( ... turns out, LSP is pretty important, I guess? Did
-    # someone a haskell?)
-
-    def __lt__(self, other: "Expression") -> "Expression":  # type: ignore
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.LESS_THAN, self, other)
+            return False
+        return all((self._args == other._args, self._action == other._action))
 
-    def __gt__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
+    def apply(self) -> cp_model.LinearExpr:
+        if self._action == Action.IDENTITY:
+            arg = self._args[0]
+            if isinstance(arg, Variable):
+                return arg._var
+            else:
+                return arg.apply()
+        # elif self._action == Action.OVERLAP:
+        # TODO: Handle Overlap action. Unclear what to do here.
+        elif self._action == Action.NOT:
+            arg = self._args[0].apply()
+            return not arg
+        elif isinstance(self._action.value, type(lambda a, b: 0)):
+            args = [arg.apply() for arg in self._args]
+            return reduce(self._action.value, args)
+        else:
+            raise ValueError("Uknown action", self._action)
+
+    def after(self, other: Union["Expression", datetime]) -> "Expression":
+        if isinstance(other, datetime):
+            other = Constant(int(other.timestamp()))
         return Expression(Action.GREATER_THAN, self, other)
 
-    def __lte__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.LESS_THAN_EQ, self, other)
+    def before(self, other: Union["Expression", datetime]) -> "Expression":
+        if isinstance(other, datetime):
+            other = Constant(int(other.timestamp()))
+        return Expression(Action.LESS_THAN, self, other)
 
-    def __gte__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.GREATER_THAN_EQ, self, other)
-
-    def __neg__(self, other: "Expression") -> "Expression":  # type: ignore
-        return Expression(Action.NOT, self, other)
-
-    def __add__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.ADD, self, other)
-
-    def __sub__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.SUBTRACT, self, other)
-
-    def __and__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
+    def and_(self, other: Union["Expression", bool]) -> "Expression":
+        if isinstance(other, bool):
+            other = Constant(1 if other else 0)
         return Expression(Action.AND, self, other)
-
-    def __or__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.OR, self, other)
-
-    def __xor__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.XOR, self, other)
-
-    def __eq__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.EQUALS, self, other)
-
-    def __ne__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.NOT_EQUALS, self, other)
-
-    def __mul__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.MULTIPLY, self, other)
-
-    def __abs__(self, other: "Expression") -> "Expression":  # type: ignore
-        if not isinstance(other, Expression):
-            return NotImplemented
-        return Expression(Action.ABSOLUTE, self, other)
 
 
 class Variable(Expression):
+    """Variables descend from Expressions so that they can be used in the DSL
+    as a substitute for an expression. Their action is fixed to 'IDENTITY', and
+    their only argument is a self reference - so in general, do not treat them
+    like expressions unless composing them in the DSL. They are different.
+
+    Internally, they store a reference to a singleton variable object in the
+    final model (once that model is bound).
+    """
+
+    # Someone double check me on this, but I believe there is an implicit
+    # constraint on the use of Variables in composing Expressions: a given
+    # Expression must terminate with 2 and only 2 variables. This ensures the
+    # linearity of the constraint, which is a necessity of this solver engine
+    # (a linear constraint solver). Maybe this could be enforced at runtime?
+
     def __init__(self, name: str):
         super().__init__(Action.IDENTITY, self)
         self._var: Optional[cp_model.IntVar] = None
@@ -142,25 +119,33 @@ class Variable(Expression):
     def bind(self, var: cp_model.IntVar) -> None:
         self._var = var
 
-    def apply(self, *_) -> cp_model.LinearExpr:
-        # Technically, this returns a cp_model.IntVar, not a cp_model.LinearExpr. However,
-        # the or-tools API ensures that in all practical cases that we care about,
-        # the two are interchangeable. Note that there is a special case where LinearExpressions must
-        # not be non-linear w.r.t. any two variables. It's possible we could enforce that here,
-        # but for now we'll just be ok with an error in that case.
+    def apply(self) -> cp_model.IntVar:
         if self._var is None:
-            raise ValueError("Attempt to resolve an unbound variable")
-        return cast(cp_model.LinearExpr, self._var)
+            raise ValueError("Variable must be bound before it can be applied.")
+        return self._var
 
-    def __str__(self) -> str:
-        return f"Variable<{self.name}>"
+    def __repr__(self) -> str:
+        return f"VAR: '{self.name}'"
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Variable):
+            return False
+        return self.name == other.name
 
 
 class Constant(Variable):
-    def __init__(self, name: str, value: int):
-        super().__init__(name)
+    """Constants are Variables, because they represent Variables in the model.
+    The 'constant' in their name refers to the fact that they have a fixed value.
+    """
+
+    def __init__(self, value: int):
+        super().__init__("constant")
         self._value = value
 
-    def apply(self, *_) -> cp_model.LinearExpr:
-        # See Variable.apply, same note applies here.
-        return cast(cp_model.LinearExpr, self._value)
+    def __repr__(self) -> str:
+        return f"CONST: ({self._value})"
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Constant):
+            return False
+        return self._value == other._value

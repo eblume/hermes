@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-from collections import defaultdict
 import datetime as dt
-from typing import Optional, DefaultDict, Iterable
+from typing import Optional, Iterable
 
 from ortools.sat.python import cp_model
 import pytz
@@ -32,7 +31,8 @@ class Solution:
 
 class Model:
     def __init__(self):
-        self._events: DefaultDict[str, Event] = defaultdict(Event)
+        self._events: dict[str, Event] = {}
+        self._model: cp_model.CpModel = None
 
     def schedule(
         self,
@@ -71,7 +71,9 @@ class Model:
         for schedule in schedules:
             self.add_schedule(schedule, span)
 
+        # Build ("bake") the model, binding all expressions/variables to the model.
         model = self.bake(span)
+        self._model = model
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = int(timeout.total_seconds())
 
@@ -98,10 +100,15 @@ class Model:
     def add_event(self, event: Event) -> Event:
         """Returns either the given event (after registering it), or a new
         event that combines existing event info."""
-        self._events[event.name].combine(event)
-        # TODO - figure out this constraint please
-        # self.constrain_event(IntervalOverlap(event))
-        return self._events[event.name]
+        if event.name not in self._events:
+            self._events[event.name] = event
+        else:
+            if event != self._events[event.name]:
+                raise KeyError("An event with this name already exists.")
+            # TODO - This is totally recoverable. We need to combine constraints,
+            # ensure there is only one agreed-upon set of variables, etc. Just need
+            # to decide how smart to be. So for now, just error.
+        return event
 
     def add_schedule(self, schedule: Schedule, span: FiniteSpan) -> None:
         """Register this schedule on this model"""
@@ -110,17 +117,29 @@ class Model:
                 self.add_event(event)
 
     def bake(self, span: FiniteSpan) -> cp_model.CpModel:
-        self._model = cp_model.CpModel()
+        model = cp_model.CpModel()
+        # First, register each variable.
         for event in self._events.values():
-            event.bake(self, span)
+            event.register_variables(model, span)
+            for constraint in event.constraints:
+                model.Add(constraint.expression.apply()).OnlyEnforceIf(
+                    constraint.sentinel.apply()
+                )
+
+        # One model, fresh from the oven. Ready to be run.
+        return model
 
     def make_var(self, var: "Variable", span: FiniteSpan) -> None:
+        if self._model is None:
+            raise ValueError("This model bust be bake()'d first")
         lb = int(span.begins_at.timestamp())
         ub = int(span.finish_at.timestamp())
         variable = self._model.NewIntVar(lb, ub, var.name)
         var.bind(variable)
 
     def make_bool(self, var: "Variable") -> None:
+        if self._model is None:
+            raise ValueError("This model bust be bake()'d first")
         variable = self._model.NewBoolVar(var.name)
         var.bind(variable)
 
@@ -132,7 +151,13 @@ class Model:
         stop: Variable,
         is_present: Variable,
     ) -> None:
+        if self._model is None:
+            raise ValueError("This model bust be bake()'d first")
         variable = self._model.NewOptionalIntervalVar(
-            start, int(duration.total_seconds()), stop, is_present, var.name
+            start=start._var,
+            size=int(duration.total_seconds()),
+            end=stop._var,
+            is_present=is_present._var,
+            name=var.name,
         )
         var.bind(variable)

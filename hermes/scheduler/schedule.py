@@ -2,7 +2,7 @@
 import datetime as dt
 from typing import Iterable, List, TYPE_CHECKING, Any
 
-from .expression import Variable, Expression, Constant
+from .expression import Variable, Expression
 from ..span import FiniteSpan
 from ..tag import Tag  # , Category
 from ..timespan import TimeSpan
@@ -15,85 +15,7 @@ if TYPE_CHECKING:
 DEFAULT_EVENT_DURATION = dt.timedelta(minutes=30)
 
 
-class EventBase:
-    """See 'Event' - the EventBase defines the non-DSL components."""
-
-    def __init__(
-        self,
-        name: str,
-        duration: dt.timedelta = DEFAULT_EVENT_DURATION,
-        external: bool = False,
-        optional: bool = True,
-    ):
-        self.duration = duration
-        self.name = name
-
-        self.start_time = Variable(f"{name}_start")
-        self.stop_time = Variable(f"{name}_stop")
-        self.is_present = Variable(f"{name}_interval")
-        self.interval = Variable(f"{name}_start")
-
-        self._external = external
-        self._constraints: List["EventConstraint"] = []
-
-        # TODO - Is there a better way perhaps to introduce the IntervalOverlap
-        # constraint that supports polymorphism?
-        if not external:
-            # TODO - figure out this circular import roadbump
-            from .constraint import IntervalOverlap
-
-            self._constraints.append(IntervalOverlap(self))
-
-    @classmethod
-    def from_tag(cls, tag: Tag):
-        pass  # TODO`
-
-    def combine(self, other: "Event") -> "Event":
-        """Returns a new event with combined metadata."""
-        pass  # TODO
-
-    @property
-    def external(self) -> bool:
-        return self._external
-
-    def bake(self, model: "Model", span: FiniteSpan) -> None:
-        """Binds all unbound variables belonging to the event to the model, and
-        sets all registered constraints."""
-        model.make_var(self.start_time, span)
-        model.make_var(self.stop_time, span)
-        model.make_bool(self.is_present)
-        model.make_interval(
-            self.interval,
-            self.duration,
-            self.start_time,
-            self.stop_time,
-            self.is_present,
-        )
-
-        for constraint in self._constraints:
-            constraint.apply(model)
-
-    def constrain(self, constraint: "EventConstraint") -> None:
-        self._constraints.append(constraint)
-
-    def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, type(self)):
-            return False  # TODO - check I didn't get this backwards
-        return all(
-            (
-                self.name == other.name,
-                self.start_time == other.start_time,
-                self.stop_time == other.stop_time,
-                self.is_present == other.is_present,
-                self.interval == other.interval,
-            )
-        )
-
-    def __repr__(self) -> str:
-        return f"Event<'{self.name}', _constraints: {len(self._constraints)}>"
-
-
-class Event(EventBase):
+class Event:
     """The purpose of the Event is twofold:
 
     1. To store relevant event data necessary to create a Tag at model
@@ -115,17 +37,77 @@ class Event(EventBase):
     a unique Tag.
     """
 
-    # TODO - check Variable.resolve() syntax in comment above when API has finalized
+    def __init__(
+        self,
+        name: str,
+        duration: dt.timedelta = DEFAULT_EVENT_DURATION,
+        external: bool = False,
+        optional: bool = True,
+    ):
+        self.duration = duration
+        self.name = name
+        self.constraints: List["EventConstraint"] = []
+
+        self.start_time = Variable(f"{name}_start")
+        self.stop_time = Variable(f"{name}_stop")
+        self.is_present = Variable(f"{name}_is_present")
+        self.interval = Variable(f"{name}_interval")
+
+        self._external = external
+
+        # TODO - Is there a better way perhaps to introduce the IntervalOverlap
+        # constraint that supports polymorphism?
+        if not external:
+            # TODO - figure out this circular import roadbump
+            from .constraint import IntervalOverlap
+
+            self.constraints.append(IntervalOverlap(self))
+
+    @classmethod
+    def from_tag(cls, tag: Tag):
+        pass  # TODO`
+
+    def combine(self, other: "Event") -> "Event":
+        """Returns a new event with combined metadata."""
+        pass  # TODO
+
+    @property
+    def external(self) -> bool:
+        return self._external
+
+    def register_variables(self, model: "Model", span: FiniteSpan) -> None:
+        """Binds all unbound variables belonging to the event to the model."""
+        model.make_var(self.start_time, span)
+        model.make_var(self.stop_time, span)
+        model.make_bool(self.is_present)
+        model.make_interval(
+            self.interval,
+            self.duration,
+            self.start_time,
+            self.stop_time,
+            self.is_present,
+        )
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Event):
+            return False
+        return all(
+            (
+                self.name == other.name,
+                self.start_time == other.start_time,
+                self.stop_time == other.stop_time,
+                self.is_present == other.is_present,
+                self.interval == other.interval,
+            )
+        )
+
+    def __repr__(self) -> str:
+        return f"Event<'{self.name}', constraints: {len(self.constraints)}>"
 
     def in_(self, span: FiniteSpan) -> "EventConstraint":
-        begins_at = Constant(
-            f"{self.name}_in_span_left", int(span.begins_at.timestamp())
-        )
-        finish_at = Constant(
-            f"{self.name}_in_span_right", int(span.finish_at.timestamp())
-        )
-        expression = (self.start_time > begins_at) and (self.stop_time < finish_at)
-        return EventConstraint(self, expression)
+        starts_after = self.start_time.after(span.begins_at)
+        ends_before = self.stop_time.before(span.finish_at)
+        return EventConstraint(self, starts_after.and_(ends_before))
 
 
 class ScheduleItem:
@@ -151,7 +133,7 @@ class ScheduleItem:
     def events(self, span: FiniteSpan) -> Iterable[Event]:
         """May be subclassed to allow a ScheduleItem to produce multiple Events in a given window."""
         event = self.to_event()
-        event.constrain(event.in_(span))
+        event.constraints.append(event.in_(span))
         yield event
 
     def to_event(self, **event_kwargs) -> Event:
@@ -210,24 +192,24 @@ class Schedule:
 
 
 class EventConstraint:
-    def __init__(
-        self, event: EventBase, constraint: Expression, sentinel: Variable = None
-    ):
+    def __init__(self, event: Event, constraint: Expression, sentinel: Variable = None):
         self._event = event
         self._constraint = constraint
         self._sentinel: Variable = sentinel or self._event.is_present
 
-    def apply(self, model: "Model") -> None:
-        """Apply this constraint to the model."""
-        expr = self._constraint.apply(model, self._event, self._sentinel)
-        sentinel = self._sentinel.apply()
-        model._model.Add(expr).OnlyEnforceIf(sentinel)
+    @property
+    def expression(self) -> Expression:
+        return self._constraint
+
+    @property
+    def sentinel(self) -> Variable:
+        return self._sentinel
 
     def __repr__(self) -> str:
         return f"EventConstraint<'{self._event.name}', {self._constraint}, {self._sentinel}>"
 
     def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, type(self)):
+        if not isinstance(other, EventConstraint):
             return False
         # Why can't we just compare self._constraint == other._constraint?
         # Because of the DSL, `self._constraint == other._constraint` returns
