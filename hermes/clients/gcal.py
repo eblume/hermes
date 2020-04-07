@@ -19,6 +19,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from urllib.parse import quote
 import warnings
 
 from appdirs import user_data_dir
@@ -26,7 +27,6 @@ from google.auth.transport import Request
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from requests.utils import quote  # type: ignore    # mypy, plz....
 
 from ..categorypool import BaseCategoryPool
 from ..span import Span
@@ -353,7 +353,7 @@ class GoogleCalendarAPI:
                 query_params["timeMax"] = finish_at
 
             for event in self._paginated_get(
-                f"/calendars/{quote(calendar_id)}/events", params=query_params
+                f"/calendars/{quote(cid)}/events", params=query_params
             ):
                 start = event.get("start")
                 end = event.get("end")
