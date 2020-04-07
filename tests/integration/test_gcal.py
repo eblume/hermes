@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-from datetime import timedelta
+from datetime import timedelta, datetime
 from operator import attrgetter
 from pathlib import Path
 
+from dateutil.tz import tzlocal
 from hermes.clients.gcal import GoogleCalendarAPI, GoogleCalendarTimeSpan, GoogleClient
 from hermes.span import Span
 from hermes.timespan import date_parse
@@ -131,3 +132,18 @@ def test_create_event(gcal_feb_02_2019, feb_02_2019, gcal_api):
     new_gcal.flush()
     gcal_feb_02_2019.flush()
     assert len(gcal_feb_02_2019) == 0
+
+
+def test_can_gen_next_5_events(gcal_api):
+    """This test prevents a regression on some behavior I encountered when
+    trying to generate the "next five events" on any calendar on my account."""
+
+    def _gen():
+        now = datetime.now(tzlocal())
+        next_24_hours = Span(begins_at=now, finish_at=now + timedelta(hours=24))
+        for i, event in zip(range(5), gcal_api.events(span=next_24_hours)):
+            start = event.valid_from.strftime("%H:%M")
+            stop = event.valid_to.strftime("%H:%M")
+            yield f" {i}) [{start} - {stop}] {event.name}"
+
+    assert 1 <= len(list(_gen())) <= 5
