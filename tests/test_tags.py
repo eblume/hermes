@@ -4,6 +4,7 @@ import datetime as dt
 from hermes.categorypool import MutableCategoryPool
 from hermes.span import Span
 from hermes.tag import Category, MetaTag, Tag
+from hermes.utils import get_now
 import pytest
 
 from .conftest import GENERIC_RO_TIMESPANS
@@ -60,8 +61,8 @@ def test_category_contains_with_none():
     tag = Tag(
         name="Foo",
         category=None,
-        valid_from=dt.datetime.now(),
-        valid_to=dt.datetime.now(),
+        valid_from=get_now(),
+        valid_to=get_now(),
     )
     assert tag.category is None
     other_category = Category("Bar", parent=None)
@@ -85,7 +86,7 @@ def test_category_badpath(path, complex_timespan):
 
 
 def test_span_ordering():
-    now = dt.datetime.now()
+    now = get_now()
     span_left = Span(now, now + dt.timedelta(minutes=1))
     span_right = Span(now + dt.timedelta(minutes=2), now + dt.timedelta(minutes=3))
 

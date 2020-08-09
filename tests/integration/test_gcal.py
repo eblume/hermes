@@ -7,6 +7,7 @@ from dateutil.tz import tzlocal
 from hermes.clients.gcal import GoogleCalendarAPI, GoogleCalendarTimeSpan, GoogleClient
 from hermes.span import Span
 from hermes.timespan import date_parse
+from hermes.util import get_now
 import pytest
 
 
@@ -139,7 +140,7 @@ def test_can_gen_next_5_events(gcal_api):
     trying to generate the "next five events" on any calendar on my account."""
 
     def _gen():
-        now = datetime.now(tzlocal())
+        now = get_now()
         next_24_hours = Span(begins_at=now, finish_at=now + timedelta(hours=24))
         for i, event in zip(range(5), gcal_api.events(span=next_24_hours)):
             start = event.valid_from.strftime("%H:%M")

@@ -27,6 +27,7 @@ from .schedule import Schedule
 from .span import Span
 from .stochastics import Frequency
 from .timespan import date_parse
+from .utils import get_now
 
 
 APP_NAME = "HermesCLI"
@@ -136,14 +137,14 @@ def calendars(
     if today:
         if tomorrow or start_date or finish_date:
             context.Fail("You must not specify multiple calendar spans.")
-        start = datetime.now().replace(
+        start = get_now().replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
         )
         stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
     elif tomorrow:
         if today or start_date or finish_date:
             context.Fail("You must not specify multiple calendar spans.")
-        start = datetime.now().replace(
+        start = get_now().replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
         ) + timedelta(days=1)
         stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
@@ -154,7 +155,7 @@ def calendars(
         context.Fail("You must specify both a start and finish date.")
     else:
         # assume 'today'
-        start = datetime.now().replace(
+        start = get_now().replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=tzlocal()
         )
         stop = start + timedelta(days=1, microseconds=-1)  # Last microsecond of the day
@@ -295,7 +296,7 @@ def whatsnext(context, schedule, slots, check_calendar, check_calendar_id, chore
     slot_list = []
     slot_schedules = {}
     events = [e for e in gcal.iter_tags()]
-    now = datetime.now(tzlocal())
+    now = get_now()
     # TODO - the notion of 'upcoming' as relates to currently in-progress events is tricky
     upcoming_events = sorted(
         (e for e in events if e.valid_to >= now), key=attrgetter("valid_from")
