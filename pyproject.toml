@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hermes"
-version = "0.2.1"
+version = "0.2.4"
 description = "Hermes the Time Accountant provides a sliceable timeline with tagged events."
 authors = ["Erich Blume <blume.erich@gmail.com>"]
 license = "Apache-2.0"
